@@ -46,13 +46,31 @@ Include X-Plane `Log.txt` if it was not copied automatically.
 
 ## Custom Datarefs
 
+The default catalog is editable:
+
+```text
+XPlaneTruthCapture/config/default_datarefs.txt
+```
+
+Format:
+
+```text
+dataref_path|group|required
+```
+
+Example:
+
+```text
+sim/flightmodel/position/q|attitude|true
+```
+
 Edit:
 
 ```text
 XPlaneTruthCapture/config/datarefs.txt
 ```
 
-Add one dataref path per line. Restart capture after editing.
+Add one extra dataref path per line, or use the same `path|group|required` format. Restart capture after editing.
 
 Edit:
 

@@ -377,26 +377,56 @@ void addDataRefSpec(std::vector<DataRefEntry> &entries, const std::string &path,
     entries.push_back(std::move(entry));
 }
 
-void buildDataRefList()
+bool loadDataRefSpecFile(const fs::path &path, const std::string &defaultGroup, bool defaultRequired, std::vector<DataRefEntry> &entries)
 {
-    std::vector<DataRefEntry> entries;
-    if (gConfig.include_default_datarefs) {
-        for (const auto &spec : kDefaultDataRefs) {
-            addDataRefSpec(entries, spec.path, spec.group, spec.required);
-        }
+    std::ifstream file(path);
+    if (!file) {
+        return false;
     }
 
-    const auto customPath = gPluginRoot / "config" / "datarefs.txt";
-    std::ifstream file(customPath);
+    bool loadedAny = false;
     std::string line;
     while (std::getline(file, line)) {
         const auto comment = line.find('#');
         if (comment != std::string::npos) {
             line = line.substr(0, comment);
         }
-        const auto path = trim(line);
-        addDataRefSpec(entries, path, "custom", false);
+        line = trim(line);
+        if (line.empty()) {
+            continue;
+        }
+
+        std::vector<std::string> fields;
+        std::stringstream stream(line);
+        std::string field;
+        while (std::getline(stream, field, '|')) {
+            fields.push_back(trim(field));
+        }
+
+        const std::string refPath = fields.empty() ? std::string{} : fields[0];
+        const std::string group = fields.size() > 1 && !fields[1].empty() ? fields[1] : defaultGroup;
+        const bool required = fields.size() > 2 ? parseBool(fields[2], defaultRequired) : defaultRequired;
+        addDataRefSpec(entries, refPath, group, required);
+        loadedAny = true;
     }
+    return loadedAny;
+}
+
+void buildDataRefList()
+{
+    std::vector<DataRefEntry> entries;
+    if (gConfig.include_default_datarefs) {
+        const auto defaultPath = gPluginRoot / "config" / "default_datarefs.txt";
+        if (!loadDataRefSpecFile(defaultPath, "default", false, entries)) {
+            debug("default_datarefs.txt not found; using compiled fallback datarefs");
+            for (const auto &spec : kDefaultDataRefs) {
+                addDataRefSpec(entries, spec.path, spec.group, spec.required);
+            }
+        }
+    }
+
+    const auto customPath = gPluginRoot / "config" / "datarefs.txt";
+    loadDataRefSpecFile(customPath, "custom", false, entries);
 
     gDataRefs = std::move(entries);
 }

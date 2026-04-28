@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build-release:
     name: ${{ matrix.os }}
@@ -36,9 +39,9 @@ jobs:
         run: |
           mkdir -p dist
           cd build
-          zip -r "../dist/XPlaneTruthCapture-${{ runner.os }}.zip" XPlaneTruthCapture
+          cmake -E tar cfv "../dist/XPlaneTruthCapture-${{ runner.os }}.zip" --format=zip -- XPlaneTruthCapture
           cd ..
-          shasum -a 256 dist/*.zip > dist/SHA256SUMS-${{ runner.os }}.txt
+          cmake -E sha256sum dist/*.zip > dist/SHA256SUMS-${{ runner.os }}.txt
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
