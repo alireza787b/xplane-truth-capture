@@ -1,0 +1,6 @@
+# Optional custom datarefs.
+# Add one X-Plane dataref path per line. Lines beginning with # are ignored.
+#
+# Examples:
+# sim/flightmodel/position/local_x
+# sim/weather/aircraft/qnh_pas

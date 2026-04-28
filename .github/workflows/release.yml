@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-release:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download X-Plane SDK
+        shell: bash
+        run: |
+          curl -L -o XPSDK430.zip https://developer.x-plane.com/wp-content/plugins/code-sample-generation/sdk_zip_files/XPSDK430.zip
+          unzip -q XPSDK430.zip -d xpsdk
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -DXPLANE_SDK_ROOT="$PWD/xpsdk/SDK" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --config Release
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cd build
+          zip -r "../dist/XPlaneTruthCapture-${{ runner.os }}.zip" XPlaneTruthCapture
+          cd ..
+          shasum -a 256 dist/*.zip > dist/SHA256SUMS-${{ runner.os }}.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

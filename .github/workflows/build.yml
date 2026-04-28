@@ -1,0 +1,47 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download X-Plane SDK
+        shell: bash
+        run: |
+          curl -L -o XPSDK430.zip https://developer.x-plane.com/wp-content/plugins/code-sample-generation/sdk_zip_files/XPSDK430.zip
+          unzip -q XPSDK430.zip -d xpsdk
+          find xpsdk -maxdepth 3 -type f | sort | head
+
+      - name: Configure
+        shell: bash
+        run: cmake -S . -B build -DXPLANE_SDK_ROOT="$PWD/xpsdk/SDK" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: bash
+        run: cmake --build build --config Release
+
+      - name: Verify bundle
+        shell: bash
+        run: |
+          test -f build/XPlaneTruthCapture/README.md
+          test -f build/XPlaneTruthCapture/config/capture_config.ini
+          test -f build/XPlaneTruthCapture/config/datarefs.txt
+          find build/XPlaneTruthCapture -maxdepth 3 -type f | sort
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XPlaneTruthCapture-${{ runner.os }}
+          path: build/XPlaneTruthCapture

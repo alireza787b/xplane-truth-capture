@@ -1,0 +1,13 @@
+build/
+dist/
+*.zip
+*.xpl
+*.so
+*.dll
+*.dylib
+*.lib
+*.pdb
+*.ilk
+*.obj
+*.o
+.DS_Store
