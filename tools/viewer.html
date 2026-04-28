@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>XPlaneTruthCapture Viewer</title>
+  <style>
+    :root {
+      --bg: #f7f8fa;
+      --panel: #ffffff;
+      --ink: #18202a;
+      --muted: #647080;
+      --line: #d7dde5;
+      --accent: #176b87;
+      --accent2: #9a5a00;
+      --bad: #b3261e;
+      --good: #246b35;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    h1 { font-size: 18px; margin: 0; }
+    main {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      min-height: calc(100vh - 58px);
+    }
+    aside {
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+      padding: 14px;
+      overflow: auto;
+    }
+    section { padding: 14px 18px; }
+    .block {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .stack { display: grid; gap: 8px; }
+    label { color: var(--muted); font-size: 12px; }
+    input, select, button {
+      font: inherit;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #fff;
+      color: var(--ink);
+      padding: 7px 8px;
+    }
+    button {
+      cursor: pointer;
+      background: #eef7f9;
+      border-color: #b9d8e0;
+      color: #0e5268;
+    }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .card strong { display: block; font-size: 20px; }
+    .card span { color: var(--muted); font-size: 12px; }
+    canvas {
+      width: 100%;
+      height: 420px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 6px 8px;
+      text-align: left;
+      white-space: nowrap;
+    }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .scroll { overflow: auto; max-height: 360px; border: 1px solid var(--line); border-radius: 6px; }
+    .muted { color: var(--muted); }
+    .bad { color: var(--bad); }
+    .good { color: var(--good); }
+    .pill {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #edf1f5;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid var(--line); }
+      .cards { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>XPlaneTruthCapture Viewer</h1>
+    <div class="row">
+      <span id="status" class="muted">Select a run folder or files.</span>
+      <input id="fileInput" type="file" multiple webkitdirectory>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <div class="block stack">
+        <label for="columnSearch">Plot Columns</label>
+        <input id="columnSearch" placeholder="search datarefs">
+        <select id="columnSelect" multiple size="16"></select>
+        <div class="row">
+          <button id="plotBtn">Plot Selected</button>
+          <button id="exportBtn">Export Range</button>
+        </div>
+      </div>
+      <div class="block stack">
+        <label>Frame Range</label>
+        <div class="row">
+          <input id="startFrame" placeholder="start" inputmode="numeric">
+          <input id="endFrame" placeholder="end" inputmode="numeric">
+        </div>
+      </div>
+      <div class="block">
+        <div class="row"><strong>Events</strong><span id="eventCount" class="pill">0</span></div>
+        <div id="events" class="stack" style="margin-top:8px"></div>
+      </div>
+    </aside>
+    <section>
+      <div id="cards" class="cards"></div>
+      <div class="block">
+        <div class="row" style="justify-content:space-between">
+          <strong>Plot</strong>
+          <span id="plotMeta" class="muted"></span>
+        </div>
+        <canvas id="plot" width="1400" height="520"></canvas>
+      </div>
+      <div class="block">
+        <div class="row" style="justify-content:space-between">
+          <strong>Datarefs</strong>
+          <input id="datarefSearch" placeholder="filter table">
+        </div>
+        <div class="scroll" style="margin-top:8px">
+          <table id="datarefTable"></table>
+        </div>
+      </div>
+      <div class="block">
+        <strong>Issues</strong>
+        <div id="issues" class="stack" style="margin-top:8px"></div>
+      </div>
+    </section>
+  </main>
+<script>
+const state = {
+  files: {},
+  frames: [],
+  columns: [],
+  datarefs: [],
+  events: [],
+  manifest: {},
+  summary: {},
+  analysis: {},
+  selectedColumns: []
+};
+
+const $ = id => document.getElementById(id);
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else {
+      if (c === '"') quoted = true;
+      else if (c === ',') { row.push(field); field = ""; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ""; }
+      else if (c !== '\r') field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  if (!rows.length) return [];
+  const header = rows.shift();
+  return rows.filter(r => r.length && r.some(v => v !== "")).map(r => {
+    const obj = {};
+    header.forEach((h, i) => obj[h] = r[i] ?? "");
+    return obj;
+  });
+}
+
+function toNum(v) {
+  if (v === undefined || v === "" || String(v).includes(";") || String(v).startsWith("<")) return NaN;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function quantile(values, q) {
+  const xs = values.filter(Number.isFinite).sort((a,b) => a-b);
+  if (!xs.length) return NaN;
+  return xs[Math.max(0, Math.min(xs.length - 1, Math.round((xs.length - 1) * q)))];
+}
+
+function fmt(v, digits=3) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "-";
+  if (typeof v === "number") return Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(digits);
+  return String(v);
+}
+
+async function readFile(file) {
+  const text = await file.text();
+  const name = file.name;
+  state.files[name] = text;
+}
+
+async function loadFiles(files) {
+  state.files = {};
+  await Promise.all([...files].map(readFile));
+  parseLoaded();
+}
+
+async function tryAutoLoad() {
+  const names = ["manifest.json", "summary.json", "analysis_summary.json", "datarefs.csv", "events.jsonl", "frames.csv"];
+  try {
+    for (const name of names) {
+      const res = await fetch(name, { cache: "no-store" });
+      if (res.ok) state.files[name] = await res.text();
+    }
+  } catch (_) {}
+  if (state.files["frames.csv"]) parseLoaded();
+}
+
+function parseLoaded() {
+  state.manifest = state.files["manifest.json"] ? JSON.parse(state.files["manifest.json"]) : {};
+  state.summary = state.files["summary.json"] ? JSON.parse(state.files["summary.json"]) : {};
+  state.analysis = state.files["analysis_summary.json"] ? JSON.parse(state.files["analysis_summary.json"]) : {};
+  state.datarefs = state.files["datarefs.csv"] ? parseCSV(state.files["datarefs.csv"]) : [];
+  state.events = state.files["events.jsonl"] ? state.files["events.jsonl"].split(/\n/).filter(Boolean).map(line => {
+    try { return JSON.parse(line); } catch { return { type: "parse_warning", message: line }; }
+  }) : [];
+  state.frames = state.files["frames.csv"] ? parseCSV(state.files["frames.csv"]) : [];
+  state.columns = state.frames.length ? Object.keys(state.frames[0]) : [];
+  state.selectedColumns = defaultColumns().filter(c => state.columns.includes(c));
+  renderAll();
+}
+
+function defaultColumns() {
+  return [
+    "sim/operation/misc/frame_rate_period",
+    "sim/flightmodel/position/groundspeed",
+    "sim/flightmodel/position/elevation",
+    "sim/flightmodel/forces/g_axil",
+    "sim/flightmodel/forces/g_side",
+    "sim/flightmodel/forces/g_nrml",
+  ];
+}
+
+function frameRange() {
+  const start = Number($("startFrame").value || "-Infinity");
+  const end = Number($("endFrame").value || "Infinity");
+  return state.frames.filter(r => {
+    const id = Number(r.frame_id);
+    return id >= start && id <= end;
+  });
+}
+
+function renderCards() {
+  const frames = state.frames;
+  const dts = frames.slice(1).map(r => toNum(r.elapsed_since_last_call_s));
+  const periods = frames.map(r => toNum(r["sim/operation/misc/frame_rate_period"]));
+  const fps = periods.filter(p => p > 0).map(p => 1 / p);
+  const sim = frames.map(r => toNum(r["sim/time/total_flight_time_sec"])).filter(Number.isFinite);
+  const missing = state.datarefs.filter(r => r.required === "true" && r.exists !== "true").length;
+  const cards = [
+    ["Rows", frames.length],
+    ["Sim Duration", sim.length > 1 ? `${fmt(sim[sim.length-1] - sim[0], 2)} s` : "-"],
+    ["Median FPS", fmt(quantile(fps, .5), 2)],
+    ["p95 dt", `${fmt(quantile(dts, .95), 4)} s`],
+    ["Missing Required", missing],
+  ];
+  $("cards").innerHTML = cards.map(([k,v]) => `<div class="card"><strong>${v}</strong><span>${k}</span></div>`).join("");
+  $("status").textContent = frames.length ? `Loaded ${frames.length} frames` : "Select a run folder or files.";
+}
+
+function renderColumnSelect() {
+  const q = $("columnSearch").value.toLowerCase();
+  const meta = new Map(state.datarefs.map(r => [r.path, r]));
+  $("columnSelect").innerHTML = state.columns
+    .filter(c => c.toLowerCase().includes(q))
+    .map(c => {
+      const m = meta.get(c);
+      const label = m ? `${m.group || "data"} | ${c}${m.unit_hint ? " [" + m.unit_hint + "]" : ""}` : c;
+      return `<option value="${escapeHtml(c)}" ${state.selectedColumns.includes(c) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+    }).join("");
+}
+
+function renderEvents() {
+  $("eventCount").textContent = state.events.length;
+  $("events").innerHTML = state.events.slice(0, 80).map(e => {
+    const cls = e.type === "warning" ? "bad" : (e.type === "auto_phase" ? "good" : "");
+    return `<button data-frame="${e.frame_id || ""}" class="${cls}" style="text-align:left">${escapeHtml(e.type || "")}: ${escapeHtml(e.message || "")}<br><span class="muted">frame ${e.frame_id ?? "-"}</span></button>`;
+  }).join("") || `<span class="muted">No events loaded.</span>`;
+  $("events").querySelectorAll("button").forEach(btn => btn.onclick = () => {
+    if (btn.dataset.frame) {
+      $("startFrame").value = Math.max(1, Number(btn.dataset.frame) - 200);
+      $("endFrame").value = Number(btn.dataset.frame) + 200;
+      drawPlot();
+    }
+  });
+}
+
+function renderDatarefs() {
+  const q = $("datarefSearch").value.toLowerCase();
+  const rows = state.datarefs.filter(r => Object.values(r).join(" ").toLowerCase().includes(q)).slice(0, 500);
+  const header = ["path", "group", "required", "exists", "type_names", "array_len", "unit_hint"];
+  $("datarefTable").innerHTML = `<thead><tr>${header.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map(r => `<tr>${header.map(h => `<td class="${r.required === "true" && r.exists !== "true" ? "bad" : ""}">${escapeHtml(r[h] || "")}</td>`).join("")}</tr>`).join("") +
+    `</tbody>`;
+}
+
+function renderIssues() {
+  const issues = [];
+  const missing = state.datarefs.filter(r => r.required === "true" && r.exists !== "true");
+  if (missing.length) issues.push(`<div class="bad">Missing required datarefs: ${missing.map(r => escapeHtml(r.path)).join(", ")}</div>`);
+  if (!state.events.some(e => e.type === "marker")) issues.push(`<div class="muted">No user markers found. Automatic phase markers can help, but controlled tests are stronger.</div>`);
+  if (state.summary.rows_dropped) issues.push(`<div class="bad">Rows dropped: ${state.summary.rows_dropped}</div>`);
+  $("issues").innerHTML = issues.join("") || `<div class="good">No obvious file-level issues detected.</div>`;
+}
+
+function drawPlot() {
+  const canvas = $("plot");
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const rows = frameRange();
+  const cols = state.selectedColumns.filter(c => state.columns.includes(c));
+  $("plotMeta").textContent = `${rows.length} frames, ${cols.length} series`;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#d7dde5";
+  ctx.strokeRect(45, 20, canvas.width - 65, canvas.height - 60);
+  if (!rows.length || !cols.length) return;
+
+  const colors = ["#176b87", "#9a5a00", "#246b35", "#8c3a8c", "#b3261e", "#4059ad", "#a45c40"];
+  const x0 = 45, y0 = 20, w = canvas.width - 65, h = canvas.height - 60;
+  const frameIds = rows.map(r => Number(r.frame_id));
+  const minFrame = Math.min(...frameIds), maxFrame = Math.max(...frameIds);
+
+  cols.forEach((col, idx) => {
+    const values = rows.map(r => toNum(r[col]));
+    const finite = values.filter(Number.isFinite);
+    if (!finite.length) return;
+    let min = Math.min(...finite), max = Math.max(...finite);
+    if (min === max) { min -= 1; max += 1; }
+    ctx.strokeStyle = colors[idx % colors.length];
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    values.forEach((v, i) => {
+      if (!Number.isFinite(v)) return;
+      const x = x0 + ((frameIds[i] - minFrame) / Math.max(1, maxFrame - minFrame)) * w;
+      const y = y0 + (1 - (v - min) / (max - min)) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.fillStyle = colors[idx % colors.length];
+    ctx.fillText(`${col} [${fmt(min)}..${fmt(max)}]`, x0 + 8, y0 + 16 + idx * 18);
+  });
+
+  ctx.strokeStyle = "rgba(154,90,0,.25)";
+  state.events.forEach(e => {
+    const f = Number(e.frame_id);
+    if (!Number.isFinite(f) || f < minFrame || f > maxFrame) return;
+    const x = x0 + ((f - minFrame) / Math.max(1, maxFrame - minFrame)) * w;
+    ctx.beginPath();
+    ctx.moveTo(x, y0);
+    ctx.lineTo(x, y0 + h);
+    ctx.stroke();
+  });
+}
+
+function exportRange() {
+  const rows = frameRange();
+  if (!rows.length) return;
+  const header = state.columns;
+  const text = [header.join(","), ...rows.map(r => header.map(h => csvCell(r[h] || "")).join(","))].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" }));
+  a.download = "xplane_truth_selected_range.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function csvCell(value) {
+  value = String(value);
+  return /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderAll() {
+  renderCards();
+  renderColumnSelect();
+  renderEvents();
+  renderDatarefs();
+  renderIssues();
+  drawPlot();
+}
+
+$("fileInput").addEventListener("change", e => loadFiles(e.target.files));
+$("columnSearch").addEventListener("input", renderColumnSelect);
+$("datarefSearch").addEventListener("input", renderDatarefs);
+$("plotBtn").addEventListener("click", () => {
+  state.selectedColumns = [...$("columnSelect").selectedOptions].map(o => o.value);
+  drawPlot();
+});
+$("exportBtn").addEventListener("click", exportRange);
+$("startFrame").addEventListener("input", drawPlot);
+$("endFrame").addEventListener("input", drawPlot);
+tryAutoLoad();
+</script>
+</body>
+</html>

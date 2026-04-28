@@ -1,8 +1,8 @@
 # XPlaneTruthCapture
 
-Read-only X-Plane diagnostic plugin for recording datarefs, frame timing, aircraft metadata, and environment state. It is built to validate simulator bridge assumptions before changing PX4, ArduPilot, or other autopilot integrations.
+XPlaneTruthCapture is a read-only X-Plane 11/12 dataref recorder and flight-analysis capture tool. It records frame timing, aircraft state, environment datarefs, controls, engine/rotor values, and event markers to CSV/JSON files that can be inspected offline.
 
-The plugin does not control the aircraft, write actuator datarefs, change weather, or connect to PX4.
+It is designed for simulator integration diagnostics, XPLM plugin debugging, PX4 and ArduPilot SITL bridge validation, and reproducible flight telemetry analysis. The plugin does not control the aircraft, write actuator datarefs, change weather, or connect to an autopilot.
 
 ## Install
 
@@ -10,6 +10,7 @@ The plugin does not control the aircraft, write actuator datarefs, change weathe
 2. Copy the whole folder to:
 
 ```text
+X-Plane 11/Resources/plugins/XPlaneTruthCapture
 X-Plane 12/Resources/plugins/XPlaneTruthCapture
 ```
 
@@ -24,16 +25,19 @@ X-Plane 12/Resources/plugins/XPlaneTruthCapture
    - taxi, accelerate, brake
    - climb and descent
    - left and right turns
-   - hover and transition for VTOL aircraft
+   - Alia 250 or other VTOL: hover, climb, transition, fixed-wing flight, descent, landing
+   - quadcopter: hover, yaw-in-place, forward/back/left/right translations, climb, descent
+   - helicopter: hover, yaw, collective changes, climb, descent
 4. Select `Mark Event` during important moments.
+   - You can also bind the command `xplane_truth_capture/mark_event` to a key or joystick button.
 5. Select `Stop Capture`.
-6. Send the created folder from:
+6. Zip and send the created folder from:
 
 ```text
-X-Plane 12/Output/XPlaneTruthCapture/<run_id>
+X-Plane/Output/XPlaneTruthCapture/<run_id>
 ```
 
-Include X-Plane `Log.txt` if it was not copied automatically.
+Use a standard `.zip` archive. Include X-Plane `Log.txt` if it was not copied automatically.
 
 ## Output Files
 
@@ -41,8 +45,13 @@ Include X-Plane `Log.txt` if it was not copied automatically.
 - `datarefs.csv`: dataref availability, type mask, writable flag, and array length.
 - `frames.csv`: one row per captured frame/callback with raw values.
 - `events.jsonl`: start/stop, user markers, aircraft reloads, warnings.
-- `summary.json`: frame counts, dropped rows, and stop reason.
+- `summary.json`: frame counts, dropped rows, stop reason, timing stats, pause/sim-speed counts, and automatic marker count.
+- `viewer.html`: self-contained browser viewer for quick plots, dataref search, event inspection, and selected-range export.
+- `config/`: copied runtime config files used for the run.
+- `tools/analyze_capture.py`: offline analyzer copied into each run folder.
 - `Log.txt`: copied from the X-Plane root when accessible.
+
+Open `viewer.html` in a browser after the run. Some browsers block automatic reading of sibling files from `file://`; if that happens, use the file picker in the page and select the run folder or the run files.
 
 ## Custom Datarefs
 
@@ -84,6 +93,23 @@ Supported settings:
 - `max_array_values = 32`
 - `include_default_datarefs = true | false`
 
+## Offline Analysis
+
+Each run folder contains the analyzer script:
+
+```bash
+python tools/analyze_capture.py /path/to/Output/XPlaneTruthCapture/<run_id>
+```
+
+It writes:
+
+- `analysis_summary.json`
+- `dataref_stats.csv`
+- `derived.csv`
+- `issues.jsonl`
+
+The analyzer derives timing statistics, missing required datarefs, frame stalls, event counts, basic derived flight columns, and per-dataref numeric stats. Blank cells remain missing values; they are never converted to zero.
+
 ## Build
 
 Install CMake and a C++17 compiler. Use the latest X-Plane SDK.
@@ -104,6 +130,7 @@ On this development machine, the project can also use the SDK vendored by the ad
 ## Notes
 
 - Missing datarefs are recorded as missing, not converted to zero.
-- Effective capture rate is limited by X-Plane callback timing.
+- Effective capture rate is limited by X-Plane callback timing and simulator FPS.
 - Array datarefs are dynamically sized and truncated to `max_array_values`.
-- This first version records raw evidence. Analysis scripts and richer derived checks will be added after the first real capture bundle.
+- Byte-array datarefs are decoded as printable text when possible.
+- Default datarefs include fixed-wing, VTOL, helicopter/rotor, weather, airdata, controls, engine, acceleration, local position, local velocity, and attitude signals.

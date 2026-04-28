@@ -10,14 +10,18 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -53,10 +57,79 @@ struct Config {
 struct FrameSample {
     std::uint64_t frame_id{0};
     std::int64_t host_ns{0};
+    bool first_frame{false};
     float elapsed_since_last_call{0.0f};
     float elapsed_since_last_flight_loop{0.0f};
     int loop_counter{0};
+    int xplm_cycle_number{0};
     std::vector<std::string> values;
+};
+
+struct NumericSeries {
+    std::vector<double> values;
+
+    void reset()
+    {
+        values.clear();
+    }
+
+    void observe(double value)
+    {
+        if (std::isfinite(value)) {
+            values.push_back(value);
+        }
+    }
+
+    double mean() const
+    {
+        if (values.empty()) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        double sum = 0.0;
+        for (const double value : values) {
+            sum += value;
+        }
+        return sum / static_cast<double>(values.size());
+    }
+
+    double percentile(double q) const
+    {
+        if (values.empty()) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        std::vector<double> copy = values;
+        std::sort(copy.begin(), copy.end());
+        const auto idx = static_cast<std::size_t>(std::round(q * static_cast<double>(copy.size() - 1)));
+        return copy[std::min(idx, copy.size() - 1)];
+    }
+};
+
+struct RunStats {
+    std::int64_t host_start_ns{0};
+    std::int64_t host_stop_ns{0};
+    NumericSeries elapsed_call_s;
+    NumericSeries elapsed_flight_loop_s;
+    NumericSeries frame_period_s;
+    double first_flight_time_s{std::numeric_limits<double>::quiet_NaN()};
+    double last_flight_time_s{std::numeric_limits<double>::quiet_NaN()};
+    std::uint64_t paused_rows{0};
+    std::uint64_t sim_speed_not_1_rows{0};
+    std::uint64_t auto_markers{0};
+};
+
+struct AutoEventState {
+    bool stationary{false};
+    bool takeoff_roll{false};
+    bool airborne{false};
+    bool hover_candidate{false};
+    bool landing{false};
+    bool stopped_after_landing{false};
+    int stationary_count{0};
+    int takeoff_roll_count{0};
+    int airborne_count{0};
+    int hover_count{0};
+    int landing_count{0};
+    int stopped_count{0};
 };
 
 const DataRefSpec kDefaultDataRefs[] = {
@@ -162,9 +235,27 @@ const DataRefSpec kDefaultDataRefs[] = {
     {"sim/cockpit2/controls/yoke_roll_ratio", "controls", false},
     {"sim/cockpit2/controls/yoke_pitch_ratio", "controls", false},
     {"sim/cockpit2/controls/yoke_heading_ratio", "controls", false},
+    {"sim/cockpit2/controls/total_pitch_ratio", "controls", false},
+    {"sim/cockpit2/controls/total_roll_ratio", "controls", false},
+    {"sim/cockpit2/controls/total_heading_ratio", "controls", false},
     {"sim/cockpit2/controls/flap_ratio", "controls", false},
     {"sim/cockpit2/controls/speedbrake_ratio", "controls", false},
+    {"sim/cockpit2/controls/wheel_brake_ratio", "controls", false},
+    {"sim/cockpit2/controls/left_brake_ratio", "controls", false},
+    {"sim/cockpit2/controls/right_brake_ratio", "controls", false},
+    {"sim/cockpit2/controls/park_brake_valve", "controls", false},
+    {"sim/cockpit2/controls/parking_brake_ratio", "controls", false},
     {"sim/cockpit2/engine/actuators/throttle_ratio_all", "controls", false},
+    {"sim/cockpit2/engine/actuators/throttle_ratio", "controls", false},
+    {"sim/joystick/joystick_axis_assignments", "controls", false},
+    {"sim/joystick/joy_mapped_axis_value", "controls", false},
+    {"sim/joystick/joy_mapped_axis_avail", "controls", false},
+    {"sim/cockpit2/engine/actuators/prop_ratio", "controls", false},
+    {"sim/cockpit2/engine/actuators/prop_angle_degrees", "controls", false},
+    {"sim/cockpit2/engine/actuators/prop_pitch_deg", "controls", false},
+    {"sim/cockpit2/engine/actuators/prop_mode", "controls", false},
+    {"sim/flightmodel/engine/POINT_pitch_deg", "controls", false},
+    {"sim/flightmodel/engine/POINT_pitch_deg_use", "controls", false},
     {"sim/flightmodel/engine/ENGN_thro", "controls", false},
     {"sim/flightmodel/engine/ENGN_thro_use", "controls", false},
     {"sim/flightmodel2/engines/throttle_used_ratio", "controls", false},
@@ -175,13 +266,35 @@ const DataRefSpec kDefaultDataRefs[] = {
     {"sim/flightmodel2/wing/rudder1_deg", "controls", false},
     {"sim/flightmodel2/wing/rudder2_deg", "controls", false},
     {"sim/flightmodel2/controls/flap_handle_deploy_ratio", "controls", false},
+    {"sim/flightmodel2/gear/is_chocked", "controls", false},
+    {"sim/flightmodel2/gear/tire_abs_gain", "controls", false},
+    {"sim/flightmodel2/gear/tire_steer_command_deg", "controls", false},
 
     {"sim/flightmodel/engine/ENGN_N1_", "engine", false},
     {"sim/flightmodel/engine/ENGN_N2_", "engine", false},
     {"sim/flightmodel/engine/ENGN_thro_use", "engine", false},
     {"sim/flightmodel/engine/ENGN_TRQ", "engine", false},
+    {"sim/flightmodel/engine/ENGN_power", "engine", false},
     {"sim/flightmodel/engine/ENGN_rpm", "engine", false},
+    {"sim/flightmodel/engine/ENGN_driv_TRQ", "engine", false},
     {"sim/flightmodel2/engines/prop_rotation_speed_rad_sec", "engine", false},
+    {"sim/flightmodel2/engines/prop_pitch_deg", "engine", false},
+    {"sim/flightmodel2/engines/prop_rotation_angle_deg", "engine", false},
+    {"sim/cockpit2/engine/actuators/prop_rotation_speed_rad_sec", "engine", false},
+    {"sim/flightmodel/engine/POINT_tacrad", "engine", false},
+    {"sim/flightmodel/engine/POINT_prop_ang_deg", "engine", false},
+    {"sim/flightmodel/engine/POINT_thrust", "engine", false},
+    {"sim/flightmodel/engine/POINT_drag_TRQ", "engine", false},
+    {"sim/flightmodel/engine/POINT_driv_TRQ", "engine", false},
+
+    {"sim/weather/aircraft/wind_now_speed_msc", "weather", false},
+    {"sim/weather/aircraft/wind_now_direction_degt", "weather", false},
+
+    {"sim/flightmodel/weight/m_total", "mass", false},
+    {"sim/flightmodel/weight/m_fixed", "mass", false},
+    {"sim/flightmodel/weight/m_fuel_total", "mass", false},
+    {"sim/flightmodel/misc/cgx_ref_to_default", "mass", false},
+    {"sim/flightmodel/misc/cgz_ref_to_default", "mass", false},
 };
 
 Config gConfig;
@@ -201,10 +314,13 @@ std::mutex gQueueMutex;
 std::condition_variable gQueueCv;
 std::deque<FrameSample> gQueue;
 std::thread gWriterThread;
+RunStats gRunStats;
+AutoEventState gAutoEvents;
 
 std::mutex gEventMutex;
 std::ofstream gFramesFile;
 std::ofstream gEventsFile;
+XPLMCommandRef gMarkCommand = nullptr;
 
 std::string trim(const std::string &value)
 {
@@ -234,6 +350,19 @@ bool parseBool(const std::string &value, bool fallback)
         return false;
     }
     return fallback;
+}
+
+double parseDouble(const std::string &value)
+{
+    if (value.empty() || value.find(';') != std::string::npos || value.front() == '<') {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    char *end = nullptr;
+    const double parsed = std::strtod(value.c_str(), &end);
+    if (end == value.c_str()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return parsed;
 }
 
 std::string jsonEscape(const std::string &value)
@@ -270,6 +399,122 @@ std::string csvEscape(const std::string &value)
     }
     escaped.push_back('"');
     return escaped;
+}
+
+std::string hexByte(unsigned char value)
+{
+    constexpr char kHex[] = "0123456789ABCDEF";
+    std::string out;
+    out.push_back(kHex[(value >> 4) & 0x0F]);
+    out.push_back(kHex[value & 0x0F]);
+    return out;
+}
+
+std::string dataBytesToText(const std::vector<char> &bytes, int read)
+{
+    if (read <= 0) {
+        return {};
+    }
+
+    int textLength = read;
+    while (textLength > 0 && bytes[static_cast<std::size_t>(textLength - 1)] == '\0') {
+        --textLength;
+    }
+    const auto nul = std::find(bytes.begin(), bytes.begin() + textLength, '\0');
+    if (nul != bytes.begin() + textLength) {
+        textLength = static_cast<int>(std::distance(bytes.begin(), nul));
+    }
+
+    int printable = 0;
+    for (int i = 0; i < textLength; ++i) {
+        const auto c = static_cast<unsigned char>(bytes[static_cast<std::size_t>(i)]);
+        if (std::isprint(c) || c == '\t' || c == '\r' || c == '\n') {
+            ++printable;
+        }
+    }
+
+    if (textLength > 0 && printable >= std::max(1, (textLength * 9) / 10)) {
+        return std::string(bytes.data(), static_cast<std::size_t>(textLength));
+    }
+
+    std::ostringstream out;
+    out << "<data:" << read << " bytes hex=";
+    const int preview = std::min(read, 32);
+    for (int i = 0; i < preview; ++i) {
+        out << hexByte(static_cast<unsigned char>(bytes[static_cast<std::size_t>(i)]));
+    }
+    if (read > preview) {
+        out << "...";
+    }
+    out << ">";
+    return out.str();
+}
+
+std::string unitHint(const std::string &path)
+{
+    if (path.find("latitude") != std::string::npos || path.find("longitude") != std::string::npos ||
+        path.find("lat_ref") != std::string::npos || path.find("lon_ref") != std::string::npos) {
+        return "deg";
+    }
+    if (path.find("local_x") != std::string::npos || path.find("local_y") != std::string::npos ||
+        path.find("local_z") != std::string::npos || path.find("elevation") != std::string::npos ||
+        path.find("y_agl") != std::string::npos || path.find("_alt_levels_m") != std::string::npos) {
+        return "m";
+    }
+    if (path.find("local_v") != std::string::npos || path.find("groundspeed") != std::string::npos ||
+        path.find("true_airspeed") != std::string::npos || path.find("wind_speed_msc") != std::string::npos) {
+        return "m/s";
+    }
+    if (path.find("indicated_airspeed") != std::string::npos || path.find("airspeed_kts") != std::string::npos ||
+        path.find("true_airspeed_kts") != std::string::npos || path.find("wind_speed_kt") != std::string::npos) {
+        return "kt";
+    }
+    if (path.find("local_a") != std::string::npos) {
+        return "m/s^2";
+    }
+    if (path.find("g_axil") != std::string::npos || path.find("g_side") != std::string::npos ||
+        path.find("g_nrml") != std::string::npos || path.find("gforce") != std::string::npos) {
+        return "g";
+    }
+    if (path.find("Prad") != std::string::npos || path.find("Qrad") != std::string::npos ||
+        path.find("Rrad") != std::string::npos) {
+        return "rad/s";
+    }
+    if (path.find("/position/P") != std::string::npos || path.find("/position/Q") != std::string::npos ||
+        path.find("/position/R") != std::string::npos || path.find("_deg") != std::string::npos ||
+        path.find("psi") != std::string::npos || path.find("theta") != std::string::npos ||
+        path.find("phi") != std::string::npos || path.find("hpath") != std::string::npos ||
+        path.find("vpath") != std::string::npos || path.find("heading") != std::string::npos ||
+        path.find("magnetic_variation") != std::string::npos || path.find("alpha") != std::string::npos ||
+        path.find("beta") != std::string::npos) {
+        return "deg";
+    }
+    if (path.find("barometer") != std::string::npos && path.find("_pas") != std::string::npos) {
+        return "Pa";
+    }
+    if (path.find("barometer") != std::string::npos && path.find("_inhg") != std::string::npos) {
+        return "inHg";
+    }
+    if (path.find("temperature") != std::string::npos || path.find("temp_degc") != std::string::npos) {
+        return "degC";
+    }
+    if (path.find("_ratio") != std::string::npos || path.find("throttle_used") != std::string::npos) {
+        return "ratio";
+    }
+    if (path.find("_rad_sec") != std::string::npos) {
+        return "rad/s";
+    }
+    if (path.find("_rpm") != std::string::npos || path.find("ENGN_N1_") != std::string::npos ||
+        path.find("ENGN_N2_") != std::string::npos) {
+        return "rpm_or_percent";
+    }
+    if (path.find("_TRQ") != std::string::npos) {
+        return "N*m";
+    }
+    if (path.find("q") == path.size() - 1 || path.find("/q") != std::string::npos) {
+        return "quat";
+    }
+    return {};
 }
 
 std::int64_t steadyNowNs()
@@ -529,8 +774,10 @@ std::string readDataRefValue(const DataRefEntry &entry)
     }
 
     if ((typeMask & xplmType_Data) != 0) {
-        out << "<data:" << entry.array_len << " bytes>";
-        return out.str();
+        const int count = std::min(entry.array_len, std::max(1, gConfig.max_array_values * 64));
+        std::vector<char> values(static_cast<std::size_t>(std::max(0, count)));
+        const int read = count > 0 ? XPLMGetDatab(entry.ref, values.data(), 0, count) : 0;
+        return dataBytesToText(values, read);
     }
 
     return {};
@@ -559,6 +806,114 @@ void writeEvent(const std::string &type, const std::string &message)
                 << ",\"type\":\"" << jsonEscape(type)
                 << "\",\"message\":\"" << jsonEscape(message) << "\"}\n";
     gEventsFile.flush();
+}
+
+std::string sampleValue(const FrameSample &sample, const std::string &path)
+{
+    for (std::size_t i = 0; i < gDataRefs.size() && i < sample.values.size(); ++i) {
+        if (gDataRefs[i].path == path) {
+            return sample.values[i];
+        }
+    }
+    return {};
+}
+
+double sampleDouble(const FrameSample &sample, const std::string &path)
+{
+    return parseDouble(sampleValue(sample, path));
+}
+
+bool sampleTruthy(const FrameSample &sample, const std::string &path)
+{
+    const double value = sampleDouble(sample, path);
+    return std::isfinite(value) && value > 0.5;
+}
+
+void writeJsonNumber(std::ostream &out, double value)
+{
+    if (std::isfinite(value)) {
+        out << std::setprecision(10) << value;
+    } else {
+        out << "null";
+    }
+}
+
+void writeSeriesSummary(std::ostream &out, const std::string &name, const NumericSeries &series, bool trailingComma)
+{
+    out << "    \"" << name << "\": {\n";
+    out << "      \"count\": " << series.values.size() << ",\n";
+    out << "      \"min\": "; writeJsonNumber(out, series.percentile(0.0)); out << ",\n";
+    out << "      \"p50\": "; writeJsonNumber(out, series.percentile(0.5)); out << ",\n";
+    out << "      \"p95\": "; writeJsonNumber(out, series.percentile(0.95)); out << ",\n";
+    out << "      \"p99\": "; writeJsonNumber(out, series.percentile(0.99)); out << ",\n";
+    out << "      \"max\": "; writeJsonNumber(out, series.percentile(1.0)); out << ",\n";
+    out << "      \"mean\": "; writeJsonNumber(out, series.mean()); out << "\n";
+    out << "    }" << (trailingComma ? "," : "") << "\n";
+}
+
+void maybeAutoEvent(bool condition, int &counter, bool &latched, const std::string &label)
+{
+    if (latched) {
+        return;
+    }
+    if (condition) {
+        ++counter;
+    } else {
+        counter = 0;
+    }
+    if (counter >= 5) {
+        latched = true;
+        ++gRunStats.auto_markers;
+        writeEvent("auto_phase", label);
+    }
+}
+
+void observeSample(const FrameSample &sample)
+{
+    if (sample.first_frame) {
+        gRunStats.host_start_ns = sample.host_ns;
+    } else {
+        gRunStats.elapsed_call_s.observe(sample.elapsed_since_last_call);
+        gRunStats.elapsed_flight_loop_s.observe(sample.elapsed_since_last_flight_loop);
+    }
+
+    const double simTime = sampleDouble(sample, "sim/time/total_flight_time_sec");
+    if (std::isfinite(simTime)) {
+        if (!std::isfinite(gRunStats.first_flight_time_s)) {
+            gRunStats.first_flight_time_s = simTime;
+        }
+        gRunStats.last_flight_time_s = simTime;
+    }
+
+    gRunStats.frame_period_s.observe(sampleDouble(sample, "sim/operation/misc/frame_rate_period"));
+
+    if (sampleTruthy(sample, "sim/time/paused")) {
+        ++gRunStats.paused_rows;
+    }
+    const double simSpeed = sampleDouble(sample, "sim/time/sim_speed");
+    if (std::isfinite(simSpeed) && std::fabs(simSpeed - 1.0) > 0.01) {
+        ++gRunStats.sim_speed_not_1_rows;
+    }
+
+    const double gs = sampleDouble(sample, "sim/flightmodel/position/groundspeed");
+    const double agl = sampleDouble(sample, "sim/flightmodel/position/y_agl");
+    const double vy = sampleDouble(sample, "sim/flightmodel/position/local_vy");
+    const bool onGroundAny = sampleTruthy(sample, "sim/flightmodel/failures/onground_any");
+    const bool gearOnGround = sampleTruthy(sample, "sim/flightmodel2/gear/on_ground");
+    const bool onGround = onGroundAny || gearOnGround || (std::isfinite(agl) && agl < 0.75);
+    const bool moving = std::isfinite(gs) && gs > 2.0;
+    const bool fastOnGround = onGround && std::isfinite(gs) && gs > 5.0;
+    const bool airborne = !onGround && std::isfinite(agl) && agl > 3.0;
+    const bool hover = airborne && std::isfinite(gs) && gs < 3.0 && (!std::isfinite(vy) || std::fabs(vy) < 1.5);
+    const bool landing = gAutoEvents.airborne && onGround;
+    const bool stopped = gAutoEvents.landing && onGround && std::isfinite(gs) && gs < 0.75;
+
+    maybeAutoEvent(onGround && !moving, gAutoEvents.stationary_count, gAutoEvents.stationary, "stationary_or_taxi_idle");
+    maybeAutoEvent(fastOnGround, gAutoEvents.takeoff_roll_count, gAutoEvents.takeoff_roll, "takeoff_or_fast_ground_roll");
+    maybeAutoEvent(airborne, gAutoEvents.airborne_count, gAutoEvents.airborne, "airborne");
+    maybeAutoEvent(hover, gAutoEvents.hover_count, gAutoEvents.hover_candidate, "hover_candidate");
+    maybeAutoEvent(landing, gAutoEvents.landing_count, gAutoEvents.landing, "landing_or_ground_contact");
+    maybeAutoEvent(stopped, gAutoEvents.stopped_count, gAutoEvents.stopped_after_landing, "stopped_after_landing");
 }
 
 void writeManifest()
@@ -600,7 +955,7 @@ void writeManifest()
 void writeDataRefTable()
 {
     std::ofstream file(gRunDir / "datarefs.csv");
-    file << "path,group,required,exists,type_mask,type_names,writable,array_len\n";
+    file << "path,group,required,exists,type_mask,type_names,writable,array_len,unit_hint\n";
     for (const auto &entry : gDataRefs) {
         file << csvEscape(entry.path) << ','
              << csvEscape(entry.group) << ','
@@ -609,14 +964,15 @@ void writeDataRefTable()
              << entry.type_mask << ','
              << csvEscape(typeMaskString(entry.type_mask)) << ','
              << entry.writable << ','
-             << entry.array_len << '\n';
+             << entry.array_len << ','
+             << csvEscape(unitHint(entry.path)) << '\n';
     }
 }
 
 void openFrameFile()
 {
     gFramesFile.open(gRunDir / "frames.csv", std::ios::out | std::ios::trunc);
-    gFramesFile << "frame_id,host_ns,elapsed_since_last_call_s,elapsed_since_last_flight_loop_s,loop_counter";
+    gFramesFile << "frame_id,host_ns,first_frame,elapsed_since_last_call_s,elapsed_since_last_flight_loop_s,loop_counter,xplm_cycle_number";
     for (const auto &entry : gDataRefs) {
         gFramesFile << ',' << csvEscape(entry.path);
     }
@@ -645,9 +1001,11 @@ void writerLoop()
         if (gFramesFile) {
             gFramesFile << sample.frame_id << ','
                         << sample.host_ns << ','
+                        << (sample.first_frame ? "true" : "false") << ','
                         << sample.elapsed_since_last_call << ','
                         << sample.elapsed_since_last_flight_loop << ','
-                        << sample.loop_counter;
+                        << sample.loop_counter << ','
+                        << sample.xplm_cycle_number;
             for (const auto &value : sample.values) {
                 gFramesFile << ',' << csvEscape(value);
             }
@@ -686,16 +1044,60 @@ void copyXPlaneLog()
     }
 }
 
+void copyFileIfExists(const fs::path &source, const fs::path &dest)
+{
+    try {
+        if (fs::exists(source)) {
+            fs::create_directories(dest.parent_path());
+            fs::copy_file(source, dest, fs::copy_options::overwrite_existing);
+        }
+    } catch (...) {
+        writeEvent("warning", "Could not copy support file: " + source.string());
+    }
+}
+
+void copyRunSupportFiles()
+{
+    copyFileIfExists(gPluginRoot / "config" / "capture_config.ini", gRunDir / "config" / "capture_config.ini");
+    copyFileIfExists(gPluginRoot / "config" / "default_datarefs.txt", gRunDir / "config" / "default_datarefs.txt");
+    copyFileIfExists(gPluginRoot / "config" / "datarefs.txt", gRunDir / "config" / "datarefs.txt");
+    copyFileIfExists(gPluginRoot / "tools" / "viewer.html", gRunDir / "viewer.html");
+    copyFileIfExists(gPluginRoot / "tools" / "analyze_capture.py", gRunDir / "tools" / "analyze_capture.py");
+}
+
 void writeSummary(const std::string &reason)
 {
     std::ofstream summary(gRunDir / "summary.json");
+    const double hostDurationS = (gRunStats.host_start_ns > 0 && gRunStats.host_stop_ns > gRunStats.host_start_ns)
+                                     ? static_cast<double>(gRunStats.host_stop_ns - gRunStats.host_start_ns) / 1e9
+                                     : std::numeric_limits<double>::quiet_NaN();
+    const double simDurationS = (std::isfinite(gRunStats.first_flight_time_s) && std::isfinite(gRunStats.last_flight_time_s))
+                                    ? (gRunStats.last_flight_time_s - gRunStats.first_flight_time_s)
+                                    : std::numeric_limits<double>::quiet_NaN();
+    const double medianFramePeriod = gRunStats.frame_period_s.percentile(0.5);
+    const double medianFps = std::isfinite(medianFramePeriod) && medianFramePeriod > 0.0 ? 1.0 / medianFramePeriod : std::numeric_limits<double>::quiet_NaN();
+    const double meanCall = gRunStats.elapsed_call_s.mean();
+    const double meanCallHz = std::isfinite(meanCall) && meanCall > 0.0 ? 1.0 / meanCall : std::numeric_limits<double>::quiet_NaN();
+
     summary << "{\n";
     summary << "  \"schema\": 1,\n";
     summary << "  \"stop_reason\": \"" << jsonEscape(reason) << "\",\n";
     summary << "  \"frames_seen\": " << gFrameId.load() << ",\n";
     summary << "  \"rows_written\": " << gWrittenRows.load() << ",\n";
     summary << "  \"rows_dropped\": " << gDroppedRows.load() << ",\n";
-    summary << "  \"datarefs_requested\": " << gDataRefs.size() << "\n";
+    summary << "  \"datarefs_requested\": " << gDataRefs.size() << ",\n";
+    summary << "  \"host_duration_s\": "; writeJsonNumber(summary, hostDurationS); summary << ",\n";
+    summary << "  \"sim_duration_s\": "; writeJsonNumber(summary, simDurationS); summary << ",\n";
+    summary << "  \"effective_hz_mean_from_callback\": "; writeJsonNumber(summary, meanCallHz); summary << ",\n";
+    summary << "  \"effective_hz_median_from_frame_period\": "; writeJsonNumber(summary, medianFps); summary << ",\n";
+    summary << "  \"paused_rows\": " << gRunStats.paused_rows << ",\n";
+    summary << "  \"sim_speed_not_1_rows\": " << gRunStats.sim_speed_not_1_rows << ",\n";
+    summary << "  \"auto_markers\": " << gRunStats.auto_markers << ",\n";
+    summary << "  \"timing\": {\n";
+    writeSeriesSummary(summary, "elapsed_since_last_call_s", gRunStats.elapsed_call_s, true);
+    writeSeriesSummary(summary, "elapsed_since_last_flight_loop_s", gRunStats.elapsed_flight_loop_s, true);
+    writeSeriesSummary(summary, "frame_rate_period_s", gRunStats.frame_period_s, false);
+    summary << "  }\n";
     summary << "}\n";
 }
 
@@ -736,6 +1138,8 @@ void startCapture()
     gFrameId.store(0);
     gDroppedRows.store(0);
     gWrittenRows.store(0);
+    gRunStats = RunStats{};
+    gAutoEvents = AutoEventState{};
     {
         std::lock_guard<std::mutex> lock(gQueueMutex);
         gQueue.clear();
@@ -746,6 +1150,7 @@ void startCapture()
     writeDataRefTable();
     openFrameFile();
     copyXPlaneLog();
+    copyRunSupportFiles();
     startWriter();
 
     gCapturing.store(true);
@@ -764,6 +1169,7 @@ void stopCapture(const std::string &reason)
     gCapturing.store(false);
     XPLMScheduleFlightLoop(gFlightLoopId, 0.0f, 1);
     writeEvent("stop", reason);
+    gRunStats.host_stop_ns = steadyNowNs();
     stopWriter();
 
     if (gFramesFile) {
@@ -785,15 +1191,18 @@ float flightLoopCallback(float elapsedSinceLastCall, float elapsedSinceLastFligh
     FrameSample sample;
     sample.frame_id = ++gFrameId;
     sample.host_ns = steadyNowNs();
+    sample.first_frame = sample.frame_id == 1;
     sample.elapsed_since_last_call = elapsedSinceLastCall;
     sample.elapsed_since_last_flight_loop = elapsedSinceLastFlightLoop;
     sample.loop_counter = counter;
+    sample.xplm_cycle_number = XPLMGetCycleNumber();
     sample.values.reserve(gDataRefs.size());
 
     for (const auto &entry : gDataRefs) {
         sample.values.push_back(readDataRefValue(entry));
     }
 
+    observeSample(sample);
     queueSample(std::move(sample));
     return captureInterval();
 }
@@ -861,6 +1270,31 @@ void destroyMenu()
     }
 }
 
+int markCommandHandler(XPLMCommandRef, XPLMCommandPhase phase, void *)
+{
+    if (phase == xplm_CommandBegin) {
+        writeEvent("marker", "Command marker");
+        debug("Command marker recorded");
+    }
+    return 1;
+}
+
+void createCommands()
+{
+    gMarkCommand = XPLMCreateCommand("xplane_truth_capture/mark_event", "Mark the current XPlaneTruthCapture frame");
+    if (gMarkCommand) {
+        XPLMRegisterCommandHandler(gMarkCommand, markCommandHandler, 1, nullptr);
+    }
+}
+
+void destroyCommands()
+{
+    if (gMarkCommand) {
+        XPLMUnregisterCommandHandler(gMarkCommand, markCommandHandler, 1, nullptr);
+        gMarkCommand = nullptr;
+    }
+}
+
 void createFlightLoop()
 {
     XPLMCreateFlightLoop_t params{};
@@ -893,6 +1327,7 @@ PLUGIN_API int XPluginStart(char *outName, char *outSignature, char *outDescript
 
     gPluginRoot = detectPluginRoot();
     createMenu();
+    createCommands();
     createFlightLoop();
     debug(std::string("Started v") + XTC_VERSION + " at " + gPluginRoot.string());
     return 1;
@@ -904,6 +1339,7 @@ PLUGIN_API void XPluginStop()
         stopCapture("plugin_stop");
     }
     destroyFlightLoop();
+    destroyCommands();
     destroyMenu();
     debug("Stopped");
 }
