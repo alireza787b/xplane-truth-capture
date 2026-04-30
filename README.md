@@ -18,6 +18,8 @@ X-Plane 12/Resources/plugins/XPlaneTruthCapture
 
 ## Capture A Run
 
+For formal px4xplane validation runs, follow `TEST_PROTOCOL.md`.
+
 1. Load the aircraft and airport you want to test.
 2. Select `Start Capture`.
 3. Fly a few simple maneuvers:

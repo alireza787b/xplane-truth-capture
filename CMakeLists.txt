@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(XPlaneTruthCapture VERSION 0.1.3 LANGUAGES CXX)
+project(XPlaneTruthCapture VERSION 0.1.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -88,6 +88,7 @@ add_custom_command(TARGET XPlaneTruthCapture POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${XTC_PLUGIN_ROOT}/config"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${XTC_PLUGIN_ROOT}/tools"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/README.md" "${XTC_PLUGIN_ROOT}/README.md"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/TEST_PROTOCOL.md" "${XTC_PLUGIN_ROOT}/TEST_PROTOCOL.md"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config/capture_config.ini" "${XTC_PLUGIN_ROOT}/config/capture_config.ini"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config/default_datarefs.txt" "${XTC_PLUGIN_ROOT}/config/default_datarefs.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config/datarefs.txt" "${XTC_PLUGIN_ROOT}/config/datarefs.txt"
