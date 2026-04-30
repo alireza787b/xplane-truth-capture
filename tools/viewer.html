@@ -15,6 +15,29 @@
       --accent2: #9a5a00;
       --bad: #b3261e;
       --good: #246b35;
+      --control: #ffffff;
+      --button-bg: #eef7f9;
+      --button-border: #b9d8e0;
+      --button-ink: #0e5268;
+      --canvas: #ffffff;
+      --grid: #d7dde5;
+    }
+    html[data-theme="dark"] {
+      --bg: #11161c;
+      --panel: #171e26;
+      --ink: #e8edf3;
+      --muted: #99a7b8;
+      --line: #2d3947;
+      --accent: #52b8d3;
+      --accent2: #f0a94b;
+      --bad: #ff8077;
+      --good: #79cf8f;
+      --control: #111820;
+      --button-bg: #142b35;
+      --button-border: #27596a;
+      --button-ink: #d7f6ff;
+      --canvas: #0d1319;
+      --grid: #2d3947;
     }
     * { box-sizing: border-box; }
     body {
@@ -62,15 +85,15 @@
       font: inherit;
       border: 1px solid var(--line);
       border-radius: 5px;
-      background: #fff;
+      background: var(--control);
       color: var(--ink);
       padding: 7px 8px;
     }
     button {
       cursor: pointer;
-      background: #eef7f9;
-      border-color: #b9d8e0;
-      color: #0e5268;
+      background: var(--button-bg);
+      border-color: var(--button-border);
+      color: var(--button-ink);
     }
     button:disabled { cursor: not-allowed; opacity: .5; }
     .cards {
@@ -92,8 +115,19 @@
       height: 420px;
       border: 1px solid var(--line);
       border-radius: 6px;
-      background: #fff;
+      background: var(--canvas);
     }
+    footer {
+      border-top: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--muted);
+      padding: 10px 18px;
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -130,6 +164,7 @@
     <h1>XPlaneTruthCapture Viewer</h1>
     <div class="row">
       <span id="status" class="muted">Select a run folder or files.</span>
+      <button id="themeBtn" type="button">Dark</button>
       <input id="fileInput" type="file" multiple webkitdirectory>
     </div>
   </header>
@@ -161,7 +196,15 @@
       <div class="block">
         <div class="row" style="justify-content:space-between">
           <strong>Plot</strong>
-          <span id="plotMeta" class="muted"></span>
+          <div class="row">
+            <label for="xAxisMode">X Axis</label>
+            <select id="xAxisMode">
+              <option value="frame">Frame</option>
+              <option value="sim">Sim time</option>
+              <option value="host">Host time</option>
+            </select>
+            <span id="plotMeta" class="muted"></span>
+          </div>
         </div>
         <canvas id="plot" width="1400" height="520"></canvas>
       </div>
@@ -180,6 +223,11 @@
       </div>
     </section>
   </main>
+  <footer>
+    <span>XPlaneTruthCapture</span>
+    <a href="https://github.com/alireza787b/xplane-truth-capture" target="_blank" rel="noreferrer">GitHub</a>
+    <a href="https://www.linkedin.com/in/alireza787b/" target="_blank" rel="noreferrer">Alireza787b</a>
+  </footer>
 <script>
 const state = {
   files: {},
@@ -190,7 +238,10 @@ const state = {
   manifest: {},
   summary: {},
   analysis: {},
-  selectedColumns: []
+  selectedColumns: [],
+  rowByFrame: new Map(),
+  xAxisMode: localStorage.getItem("xtc_x_axis") || "frame",
+  autoLoaded: false
 };
 
 const $ = id => document.getElementById(id);
@@ -261,7 +312,10 @@ async function tryAutoLoad() {
       if (res.ok) state.files[name] = await res.text();
     }
   } catch (_) {}
-  if (state.files["frames.csv"]) parseLoaded();
+  if (state.files["frames.csv"]) {
+    state.autoLoaded = true;
+    parseLoaded();
+  }
 }
 
 function parseLoaded() {
@@ -274,6 +328,7 @@ function parseLoaded() {
   }) : [];
   state.frames = state.files["frames.csv"] ? parseCSV(state.files["frames.csv"]) : [];
   state.columns = state.frames.length ? Object.keys(state.frames[0]) : [];
+  state.rowByFrame = new Map(state.frames.map(row => [String(row.frame_id), row]));
   state.selectedColumns = defaultColumns().filter(c => state.columns.includes(c));
   renderAll();
 }
@@ -298,22 +353,49 @@ function frameRange() {
   });
 }
 
+function monotonicSimDuration(frames) {
+  let prev = NaN;
+  let duration = 0;
+  let seen = 0;
+  frames.forEach(row => {
+    const t = toNum(row["sim/time/total_flight_time_sec"]);
+    if (!Number.isFinite(t)) return;
+    if (Number.isFinite(prev) && t >= prev) duration += t - prev;
+    prev = t;
+    seen++;
+  });
+  return seen > 1 ? duration : NaN;
+}
+
+function hasNonMonotonicSimTime() {
+  let prev = NaN;
+  return state.frames.some(row => {
+    const t = toNum(row["sim/time/total_flight_time_sec"]);
+    if (!Number.isFinite(t)) return false;
+    const reset = Number.isFinite(prev) && t < prev;
+    prev = t;
+    return reset;
+  });
+}
+
 function renderCards() {
   const frames = state.frames;
   const dts = frames.slice(1).map(r => toNum(r.elapsed_since_last_call_s));
   const periods = frames.map(r => toNum(r["sim/operation/misc/frame_rate_period"]));
   const fps = periods.filter(p => p > 0).map(p => 1 / p);
-  const sim = frames.map(r => toNum(r["sim/time/total_flight_time_sec"])).filter(Number.isFinite);
   const missing = state.datarefs.filter(r => r.required === "true" && r.exists !== "true").length;
+  const simDuration = Number.isFinite(toNum(state.summary.sim_duration_s)) ? toNum(state.summary.sim_duration_s) : monotonicSimDuration(frames);
   const cards = [
     ["Rows", frames.length],
-    ["Sim Duration", sim.length > 1 ? `${fmt(sim[sim.length-1] - sim[0], 2)} s` : "-"],
+    ["Sim Duration", Number.isFinite(simDuration) ? `${fmt(simDuration, 2)} s` : "-"],
     ["Median FPS", fmt(quantile(fps, .5), 2)],
     ["p95 dt", `${fmt(quantile(dts, .95), 4)} s`],
     ["Missing Required", missing],
   ];
   $("cards").innerHTML = cards.map(([k,v]) => `<div class="card"><strong>${v}</strong><span>${k}</span></div>`).join("");
-  $("status").textContent = frames.length ? `Loaded ${frames.length} frames` : "Select a run folder or files.";
+  $("status").textContent = frames.length
+    ? `Loaded ${frames.length} frames${state.autoLoaded ? " from this folder" : ""}`
+    : "Open beside run files or select a run folder.";
 }
 
 function renderColumnSelect() {
@@ -358,7 +440,35 @@ function renderIssues() {
   if (missing.length) issues.push(`<div class="bad">Missing required datarefs: ${missing.map(r => escapeHtml(r.path)).join(", ")}</div>`);
   if (!state.events.some(e => e.type === "marker")) issues.push(`<div class="muted">No user markers found. Automatic phase markers can help, but controlled tests are stronger.</div>`);
   if (state.summary.rows_dropped) issues.push(`<div class="bad">Rows dropped: ${state.summary.rows_dropped}</div>`);
+  if (Number(state.summary.sim_time_resets || 0) > 0 || hasNonMonotonicSimTime()) issues.push(`<div class="muted">Simulation time reset detected. Use Frame or Host time for continuous plots across reloads.</div>`);
   $("issues").innerHTML = issues.join("") || `<div class="good">No obvious file-level issues detected.</div>`;
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function firstHostNs(rows) {
+  for (const row of rows) {
+    const n = toNum(row.host_ns);
+    if (Number.isFinite(n)) return n;
+  }
+  return NaN;
+}
+
+function xValue(row, host0) {
+  if (state.xAxisMode === "sim") return toNum(row["sim/time/total_flight_time_sec"]);
+  if (state.xAxisMode === "host") {
+    const host = toNum(row.host_ns);
+    return Number.isFinite(host) && Number.isFinite(host0) ? (host - host0) / 1e9 : NaN;
+  }
+  return toNum(row.frame_id);
+}
+
+function xAxisLabel() {
+  if (state.xAxisMode === "sim") return "sim time";
+  if (state.xAxisMode === "host") return "host time";
+  return "frame";
 }
 
 function drawPlot() {
@@ -367,17 +477,20 @@ function drawPlot() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const rows = frameRange();
   const cols = state.selectedColumns.filter(c => state.columns.includes(c));
-  $("plotMeta").textContent = `${rows.length} frames, ${cols.length} series`;
-  ctx.fillStyle = "#fff";
+  $("plotMeta").textContent = `${rows.length} frames, ${cols.length} series, ${xAxisLabel()}`;
+  ctx.fillStyle = cssVar("--canvas") || "#fff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = "#d7dde5";
+  ctx.strokeStyle = cssVar("--grid") || "#d7dde5";
   ctx.strokeRect(45, 20, canvas.width - 65, canvas.height - 60);
   if (!rows.length || !cols.length) return;
 
   const colors = ["#176b87", "#9a5a00", "#246b35", "#8c3a8c", "#b3261e", "#4059ad", "#a45c40"];
   const x0 = 45, y0 = 20, w = canvas.width - 65, h = canvas.height - 60;
-  const frameIds = rows.map(r => Number(r.frame_id));
-  const minFrame = Math.min(...frameIds), maxFrame = Math.max(...frameIds);
+  const host0 = firstHostNs(state.frames);
+  const xs = rows.map(r => xValue(r, host0));
+  const finiteXs = xs.filter(Number.isFinite);
+  if (!finiteXs.length) return;
+  const minX = Math.min(...finiteXs), maxX = Math.max(...finiteXs);
 
   cols.forEach((col, idx) => {
     const values = rows.map(r => toNum(r[col]));
@@ -389,8 +502,8 @@ function drawPlot() {
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     values.forEach((v, i) => {
-      if (!Number.isFinite(v)) return;
-      const x = x0 + ((frameIds[i] - minFrame) / Math.max(1, maxFrame - minFrame)) * w;
+      if (!Number.isFinite(v) || !Number.isFinite(xs[i])) return;
+      const x = x0 + ((xs[i] - minX) / Math.max(1e-9, maxX - minX)) * w;
       const y = y0 + (1 - (v - min) / (max - min)) * h;
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
@@ -401,9 +514,10 @@ function drawPlot() {
 
   ctx.strokeStyle = "rgba(154,90,0,.25)";
   state.events.forEach(e => {
-    const f = Number(e.frame_id);
-    if (!Number.isFinite(f) || f < minFrame || f > maxFrame) return;
-    const x = x0 + ((f - minFrame) / Math.max(1, maxFrame - minFrame)) * w;
+    const row = state.rowByFrame.get(String(e.frame_id));
+    const xv = row ? xValue(row, host0) : NaN;
+    if (!Number.isFinite(xv) || xv < minX || xv > maxX) return;
+    const x = x0 + ((xv - minX) / Math.max(1e-9, maxX - minX)) * w;
     ctx.beginPath();
     ctx.moveTo(x, y0);
     ctx.lineTo(x, y0 + h);
@@ -444,6 +558,12 @@ function renderAll() {
 $("fileInput").addEventListener("change", e => loadFiles(e.target.files));
 $("columnSearch").addEventListener("input", renderColumnSelect);
 $("datarefSearch").addEventListener("input", renderDatarefs);
+$("xAxisMode").value = state.xAxisMode;
+$("xAxisMode").addEventListener("change", e => {
+  state.xAxisMode = e.target.value;
+  localStorage.setItem("xtc_x_axis", state.xAxisMode);
+  drawPlot();
+});
 $("plotBtn").addEventListener("click", () => {
   state.selectedColumns = [...$("columnSelect").selectedOptions].map(o => o.value);
   drawPlot();
@@ -451,6 +571,14 @@ $("plotBtn").addEventListener("click", () => {
 $("exportBtn").addEventListener("click", exportRange);
 $("startFrame").addEventListener("input", drawPlot);
 $("endFrame").addEventListener("input", drawPlot);
+function setTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem("xtc_theme", theme);
+  $("themeBtn").textContent = theme === "dark" ? "Light" : "Dark";
+  drawPlot();
+}
+$("themeBtn").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+setTheme(localStorage.getItem("xtc_theme") || "light");
 tryAutoLoad();
 </script>
 </body>

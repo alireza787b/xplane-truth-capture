@@ -112,6 +112,9 @@ struct RunStats {
     NumericSeries frame_period_s;
     double first_flight_time_s{std::numeric_limits<double>::quiet_NaN()};
     double last_flight_time_s{std::numeric_limits<double>::quiet_NaN()};
+    double previous_flight_time_s{std::numeric_limits<double>::quiet_NaN()};
+    double monotonic_flight_duration_s{0.0};
+    std::uint64_t sim_time_resets{0};
     std::uint64_t paused_rows{0};
     std::uint64_t sim_speed_not_1_rows{0};
     std::uint64_t auto_markers{0};
@@ -882,7 +885,16 @@ void observeSample(const FrameSample &sample)
         if (!std::isfinite(gRunStats.first_flight_time_s)) {
             gRunStats.first_flight_time_s = simTime;
         }
+        if (std::isfinite(gRunStats.previous_flight_time_s)) {
+            if (simTime >= gRunStats.previous_flight_time_s) {
+                gRunStats.monotonic_flight_duration_s += simTime - gRunStats.previous_flight_time_s;
+            } else {
+                ++gRunStats.sim_time_resets;
+                writeEvent("warning", "Simulation time reset detected; summary duration is segmented");
+            }
+        }
         gRunStats.last_flight_time_s = simTime;
+        gRunStats.previous_flight_time_s = simTime;
     }
 
     gRunStats.frame_period_s.observe(sampleDouble(sample, "sim/operation/misc/frame_rate_period"));
@@ -902,7 +914,7 @@ void observeSample(const FrameSample &sample)
     const bool gearOnGround = sampleTruthy(sample, "sim/flightmodel2/gear/on_ground");
     const bool onGround = onGroundAny || gearOnGround || (std::isfinite(agl) && agl < 0.75);
     const bool moving = std::isfinite(gs) && gs > 2.0;
-    const bool fastOnGround = onGround && std::isfinite(gs) && gs > 5.0;
+    const bool fastOnGround = !gAutoEvents.airborne && onGround && std::isfinite(gs) && gs > 5.0;
     const bool airborne = !onGround && std::isfinite(agl) && agl > 3.0;
     const bool hover = airborne && std::isfinite(gs) && gs < 3.0 && (!std::isfinite(vy) || std::fabs(vy) < 1.5);
     const bool landing = gAutoEvents.airborne && onGround;
@@ -1072,7 +1084,7 @@ void writeSummary(const std::string &reason)
                                      ? static_cast<double>(gRunStats.host_stop_ns - gRunStats.host_start_ns) / 1e9
                                      : std::numeric_limits<double>::quiet_NaN();
     const double simDurationS = (std::isfinite(gRunStats.first_flight_time_s) && std::isfinite(gRunStats.last_flight_time_s))
-                                    ? (gRunStats.last_flight_time_s - gRunStats.first_flight_time_s)
+                                    ? gRunStats.monotonic_flight_duration_s
                                     : std::numeric_limits<double>::quiet_NaN();
     const double medianFramePeriod = gRunStats.frame_period_s.percentile(0.5);
     const double medianFps = std::isfinite(medianFramePeriod) && medianFramePeriod > 0.0 ? 1.0 / medianFramePeriod : std::numeric_limits<double>::quiet_NaN();
@@ -1088,6 +1100,9 @@ void writeSummary(const std::string &reason)
     summary << "  \"datarefs_requested\": " << gDataRefs.size() << ",\n";
     summary << "  \"host_duration_s\": "; writeJsonNumber(summary, hostDurationS); summary << ",\n";
     summary << "  \"sim_duration_s\": "; writeJsonNumber(summary, simDurationS); summary << ",\n";
+    summary << "  \"sim_first_time_s\": "; writeJsonNumber(summary, gRunStats.first_flight_time_s); summary << ",\n";
+    summary << "  \"sim_last_time_s\": "; writeJsonNumber(summary, gRunStats.last_flight_time_s); summary << ",\n";
+    summary << "  \"sim_time_resets\": " << gRunStats.sim_time_resets << ",\n";
     summary << "  \"effective_hz_mean_from_callback\": "; writeJsonNumber(summary, meanCallHz); summary << ",\n";
     summary << "  \"effective_hz_median_from_frame_period\": "; writeJsonNumber(summary, medianFps); summary << ",\n";
     summary << "  \"paused_rows\": " << gRunStats.paused_rows << ",\n";
@@ -1171,6 +1186,7 @@ void stopCapture(const std::string &reason)
     writeEvent("stop", reason);
     gRunStats.host_stop_ns = steadyNowNs();
     stopWriter();
+    copyXPlaneLog();
 
     if (gFramesFile) {
         gFramesFile.close();

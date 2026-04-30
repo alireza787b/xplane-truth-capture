@@ -46,12 +46,12 @@ Use a standard `.zip` archive. Include X-Plane `Log.txt` if it was not copied au
 - `frames.csv`: one row per captured frame/callback with raw values.
 - `events.jsonl`: start/stop, user markers, aircraft reloads, warnings.
 - `summary.json`: frame counts, dropped rows, stop reason, timing stats, pause/sim-speed counts, and automatic marker count.
-- `viewer.html`: self-contained browser viewer for quick plots, dataref search, event inspection, and selected-range export.
+- `viewer.html`: self-contained browser viewer for quick plots, frame/time x-axis selection, dark/light review, dataref search, event inspection, and selected-range export.
 - `config/`: copied runtime config files used for the run.
 - `tools/analyze_capture.py`: offline analyzer copied into each run folder.
 - `Log.txt`: copied from the X-Plane root when accessible.
 
-Open `viewer.html` in a browser after the run. Some browsers block automatic reading of sibling files from `file://`; if that happens, use the file picker in the page and select the run folder or the run files.
+Open `viewer.html` in a browser after the run. If the browser allows local sibling-file reads, the page loads the current run automatically. Some browsers block that from `file://`; if that happens, use the file picker in the page and select the run folder or the run files.
 
 ## Custom Datarefs
 
@@ -108,7 +108,7 @@ It writes:
 - `derived.csv`
 - `issues.jsonl`
 
-The analyzer derives timing statistics, missing required datarefs, frame stalls, event counts, basic derived flight columns, and per-dataref numeric stats. Blank cells remain missing values; they are never converted to zero.
+The analyzer derives timing statistics, missing required datarefs, frame stalls, event counts, sim-time reset segments, basic derived flight columns, and per-dataref numeric stats. Array datarefs are summarized element-wise. Blank cells remain missing values; they are never converted to zero.
 
 ## Build
 
