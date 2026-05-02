@@ -1,0 +1,27 @@
+# Optional planned event markers.
+# Format: marker_id|name|description
+# The plugin reads this file when capture starts.
+#
+# Commands:
+# - xplane_truth_capture/mark_event: generic marker
+# - xplane_truth_capture/mark_planned_event: mark current planned event
+# - xplane_truth_capture/mark_planned_event_and_advance: mark current event and advance
+# - xplane_truth_capture/next_marker: advance current planned event
+# - xplane_truth_capture/previous_marker: move to previous planned event
+#
+# Edit these examples for your test card.
+
+GROUND_STATIC|Ground static|Aircraft stable on ground before maneuver sequence
+TAKEOFF_BEGIN|Takeoff begin|Start of takeoff or vertical lift
+HOVER_START|Hover start|Start of sustained hover segment
+HOVER_END|Hover end|End of sustained hover segment
+YAW_LEFT|Yaw left|Yaw left in place or low-speed turn
+YAW_RIGHT|Yaw right|Yaw right in place or low-speed turn
+TRANSLATE_FORWARD|Translate forward|Forward translation from hover
+TRANSLATE_BACKWARD|Translate backward|Backward translation from hover
+TRANSLATE_RIGHT|Translate right|Right translation from hover
+TRANSLATE_LEFT|Translate left|Left translation from hover
+CLIMB|Climb|Positive vertical speed segment
+DESCENT|Descent|Negative vertical speed segment
+LANDING|Landing|Final descent and ground contact
+STOP|Stop|Aircraft stopped after landing

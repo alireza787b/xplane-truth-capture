@@ -185,6 +185,8 @@
           <input id="startFrame" placeholder="start" inputmode="numeric">
           <input id="endFrame" placeholder="end" inputmode="numeric">
         </div>
+        <label for="markerSpan">Marker Span</label>
+        <select id="markerSpan"></select>
       </div>
       <div class="block">
         <div class="row"><strong>Events</strong><span id="eventCount" class="pill">0</span></div>
@@ -203,6 +205,7 @@
               <option value="sim">Sim time</option>
               <option value="host">Host time</option>
             </select>
+            <label><input id="showEvents" type="checkbox"> Events</label>
             <span id="plotMeta" class="muted"></span>
           </div>
         </div>
@@ -241,6 +244,7 @@ const state = {
   selectedColumns: [],
   rowByFrame: new Map(),
   xAxisMode: localStorage.getItem("xtc_x_axis") || "frame",
+  showEvents: localStorage.getItem("xtc_show_events") !== "false",
   autoLoaded: false
 };
 
@@ -414,7 +418,9 @@ function renderEvents() {
   $("eventCount").textContent = state.events.length;
   $("events").innerHTML = state.events.slice(0, 80).map(e => {
     const cls = e.type === "warning" ? "bad" : (e.type === "auto_phase" ? "good" : "");
-    return `<button data-frame="${e.frame_id || ""}" class="${cls}" style="text-align:left">${escapeHtml(e.type || "")}: ${escapeHtml(e.message || "")}<br><span class="muted">frame ${e.frame_id ?? "-"}</span></button>`;
+    const title = e.marker_name ? `${e.marker_id || "marker"}: ${e.marker_name}` : (e.message || "");
+    const detail = e.marker_description ? `<br><span class="muted">${escapeHtml(e.marker_description)}</span>` : "";
+    return `<button data-frame="${e.frame_id || ""}" class="${cls}" style="text-align:left">${escapeHtml(e.type || "")}: ${escapeHtml(title)}${detail}<br><span class="muted">frame ${e.frame_id ?? "-"}</span></button>`;
   }).join("") || `<span class="muted">No events loaded.</span>`;
   $("events").querySelectorAll("button").forEach(btn => btn.onclick = () => {
     if (btn.dataset.frame) {
@@ -423,6 +429,24 @@ function renderEvents() {
       drawPlot();
     }
   });
+  renderMarkerSpans();
+}
+
+function markerTitle(event) {
+  if (event.marker_name) return `${event.marker_id || "marker"}: ${event.marker_name}`;
+  return event.message || event.type || "marker";
+}
+
+function renderMarkerSpans() {
+  const markers = state.events
+    .filter(e => e.type === "marker" && Number.isFinite(Number(e.frame_id)))
+    .sort((a, b) => Number(a.frame_id) - Number(b.frame_id));
+  const options = [`<option value="">Select marker span</option>`];
+  for (let i = 0; i + 1 < markers.length; i++) {
+    const a = markers[i], b = markers[i + 1];
+    options.push(`<option value="${Number(a.frame_id)}:${Number(b.frame_id)}">${escapeHtml(markerTitle(a))} -> ${escapeHtml(markerTitle(b))}</option>`);
+  }
+  $("markerSpan").innerHTML = options.join("");
 }
 
 function renderDatarefs() {
@@ -512,17 +536,19 @@ function drawPlot() {
     ctx.fillText(`${col} [${fmt(min)}..${fmt(max)}]`, x0 + 8, y0 + 16 + idx * 18);
   });
 
-  ctx.strokeStyle = "rgba(154,90,0,.25)";
-  state.events.forEach(e => {
-    const row = state.rowByFrame.get(String(e.frame_id));
-    const xv = row ? xValue(row, host0) : NaN;
-    if (!Number.isFinite(xv) || xv < minX || xv > maxX) return;
-    const x = x0 + ((xv - minX) / Math.max(1e-9, maxX - minX)) * w;
-    ctx.beginPath();
-    ctx.moveTo(x, y0);
-    ctx.lineTo(x, y0 + h);
-    ctx.stroke();
-  });
+  if (state.showEvents) {
+    ctx.strokeStyle = "rgba(154,90,0,.25)";
+    state.events.forEach(e => {
+      const row = state.rowByFrame.get(String(e.frame_id));
+      const xv = row ? xValue(row, host0) : NaN;
+      if (!Number.isFinite(xv) || xv < minX || xv > maxX) return;
+      const x = x0 + ((xv - minX) / Math.max(1e-9, maxX - minX)) * w;
+      ctx.beginPath();
+      ctx.moveTo(x, y0);
+      ctx.lineTo(x, y0 + h);
+      ctx.stroke();
+    });
+  }
 }
 
 function exportRange() {
@@ -563,6 +589,21 @@ $("xAxisMode").addEventListener("change", e => {
   state.xAxisMode = e.target.value;
   localStorage.setItem("xtc_x_axis", state.xAxisMode);
   drawPlot();
+});
+$("showEvents").checked = state.showEvents;
+$("showEvents").addEventListener("change", e => {
+  state.showEvents = e.target.checked;
+  localStorage.setItem("xtc_show_events", state.showEvents ? "true" : "false");
+  drawPlot();
+});
+$("markerSpan").addEventListener("change", e => {
+  if (!e.target.value) return;
+  const [start, end] = e.target.value.split(":").map(Number);
+  if (Number.isFinite(start) && Number.isFinite(end)) {
+    $("startFrame").value = start;
+    $("endFrame").value = end;
+    drawPlot();
+  }
 });
 $("plotBtn").addEventListener("click", () => {
   state.selectedColumns = [...$("columnSelect").selectedOptions].map(o => o.value);

@@ -7,13 +7,15 @@ Use the latest release build and send the complete run folder as a standard `.zi
 - Install the whole `XPlaneTruthCapture` folder into `X-Plane/Resources/plugins/`.
 - Start X-Plane, load the aircraft, and wait until the aircraft is stable.
 - If possible, use clear weather and low/no wind for the first controlled run.
-- Bind `xplane_truth_capture/mark_event` to a keyboard key or joystick button.
+- Edit `XPlaneTruthCapture/config/marker_plan.txt` if you want custom maneuver names.
+- Bind `xplane_truth_capture/mark_planned_event_and_advance` to a keyboard key or joystick button.
+- Bind `xplane_truth_capture/mark_event` as a backup generic marker if possible.
 - Do not reload or change aircraft during a capture.
 
 ## Capture Steps
 
 1. Start capture from `Plugins > XPlaneTruthCapture > Start Capture`.
-2. Press `Mark Event` before and after each maneuver.
+2. Press the planned marker key before and after each maneuver.
 3. Keep each marked maneuver simple and separated by 5-10 seconds of steady flight when possible.
 4. Stop capture from `Plugins > XPlaneTruthCapture > Stop Capture`.
 5. Zip the created folder from `X-Plane/Output/XPlaneTruthCapture/<run_id>/`.

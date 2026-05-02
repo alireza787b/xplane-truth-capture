@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(XPlaneTruthCapture VERSION 0.1.4 LANGUAGES CXX)
+project(XPlaneTruthCapture VERSION 0.1.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -92,6 +92,7 @@ add_custom_command(TARGET XPlaneTruthCapture POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config/capture_config.ini" "${XTC_PLUGIN_ROOT}/config/capture_config.ini"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config/default_datarefs.txt" "${XTC_PLUGIN_ROOT}/config/default_datarefs.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config/datarefs.txt" "${XTC_PLUGIN_ROOT}/config/datarefs.txt"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/config/marker_plan.txt" "${XTC_PLUGIN_ROOT}/config/marker_plan.txt"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/viewer.html" "${XTC_PLUGIN_ROOT}/tools/viewer.html"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/analyze_capture.py" "${XTC_PLUGIN_ROOT}/tools/analyze_capture.py"
     COMMENT "Staging XPlaneTruthCapture plugin bundle"

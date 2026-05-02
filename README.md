@@ -32,6 +32,7 @@ For formal px4xplane validation runs, follow `TEST_PROTOCOL.md`.
    - helicopter: hover, yaw, collective changes, climb, descent
 4. Select `Mark Event` during important moments.
    - You can also bind the command `xplane_truth_capture/mark_event` to a key or joystick button.
+   - For planned test-card events, edit `config/marker_plan.txt` and bind `xplane_truth_capture/mark_planned_event_and_advance`.
 5. Select `Stop Capture`.
 6. Zip and send the created folder from:
 
@@ -94,6 +95,30 @@ Supported settings:
 - `capture_rate = every_frame | 30hz | 10hz`
 - `max_array_values = 32`
 - `include_default_datarefs = true | false`
+
+## Planned Markers
+
+Edit:
+
+```text
+XPlaneTruthCapture/config/marker_plan.txt
+```
+
+Format:
+
+```text
+marker_id|name|description
+```
+
+Useful commands for keyboard or joystick binding:
+
+- `xplane_truth_capture/mark_event`
+- `xplane_truth_capture/mark_planned_event`
+- `xplane_truth_capture/mark_planned_event_and_advance`
+- `xplane_truth_capture/next_marker`
+- `xplane_truth_capture/previous_marker`
+
+Planned marker metadata is written to `events.jsonl` and copied into each run folder.
 
 ## Offline Analysis
 

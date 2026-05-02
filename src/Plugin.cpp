@@ -48,6 +48,12 @@ struct DataRefEntry {
     int array_len{0};
 };
 
+struct MarkerPlanEntry {
+    std::string id;
+    std::string name;
+    std::string description;
+};
+
 struct Config {
     std::string capture_rate{"every_frame"};
     int max_array_values{32};
@@ -319,11 +325,17 @@ std::deque<FrameSample> gQueue;
 std::thread gWriterThread;
 RunStats gRunStats;
 AutoEventState gAutoEvents;
+std::vector<MarkerPlanEntry> gMarkerPlan;
+std::size_t gMarkerPlanIndex{0};
 
 std::mutex gEventMutex;
 std::ofstream gFramesFile;
 std::ofstream gEventsFile;
 XPLMCommandRef gMarkCommand = nullptr;
+XPLMCommandRef gMarkPlannedCommand = nullptr;
+XPLMCommandRef gMarkPlannedAdvanceCommand = nullptr;
+XPLMCommandRef gNextMarkerCommand = nullptr;
+XPLMCommandRef gPreviousMarkerCommand = nullptr;
 
 std::string trim(const std::string &value)
 {
@@ -660,6 +672,49 @@ bool loadDataRefSpecFile(const fs::path &path, const std::string &defaultGroup, 
     return loadedAny;
 }
 
+void loadMarkerPlan()
+{
+    gMarkerPlan.clear();
+    gMarkerPlanIndex = 0;
+
+    const auto path = gPluginRoot / "config" / "marker_plan.txt";
+    std::ifstream file(path);
+    if (!file) {
+        debug("marker_plan.txt not found; planned markers disabled");
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        const auto comment = line.find('#');
+        if (comment != std::string::npos) {
+            line = line.substr(0, comment);
+        }
+        line = trim(line);
+        if (line.empty()) {
+            continue;
+        }
+
+        std::vector<std::string> fields;
+        std::stringstream stream(line);
+        std::string field;
+        while (std::getline(stream, field, '|')) {
+            fields.push_back(trim(field));
+        }
+
+        MarkerPlanEntry entry;
+        entry.id = fields.empty() ? std::string{} : fields[0];
+        entry.name = fields.size() > 1 ? fields[1] : entry.id;
+        entry.description = fields.size() > 2 ? fields[2] : std::string{};
+        if (entry.id.empty() && entry.name.empty()) {
+            continue;
+        }
+        gMarkerPlan.push_back(std::move(entry));
+    }
+
+    debug("Loaded " + std::to_string(gMarkerPlan.size()) + " planned markers");
+}
+
 void buildDataRefList()
 {
     std::vector<DataRefEntry> entries;
@@ -798,7 +853,8 @@ float captureInterval()
     return -1.0f;
 }
 
-void writeEvent(const std::string &type, const std::string &message)
+void writeEventFields(const std::string &type, const std::string &message,
+                      const std::vector<std::pair<std::string, std::string>> &fields = {})
 {
     std::lock_guard<std::mutex> lock(gEventMutex);
     if (!gEventsFile) {
@@ -807,8 +863,67 @@ void writeEvent(const std::string &type, const std::string &message)
     gEventsFile << "{\"host_ns\":" << steadyNowNs()
                 << ",\"frame_id\":" << gFrameId.load()
                 << ",\"type\":\"" << jsonEscape(type)
-                << "\",\"message\":\"" << jsonEscape(message) << "\"}\n";
+                << "\",\"message\":\"" << jsonEscape(message) << "\"";
+    for (const auto &field : fields) {
+        gEventsFile << ",\"" << jsonEscape(field.first) << "\":\"" << jsonEscape(field.second) << "\"";
+    }
+    gEventsFile << "}\n";
     gEventsFile.flush();
+}
+
+void writeEvent(const std::string &type, const std::string &message)
+{
+    writeEventFields(type, message);
+}
+
+std::string markerLabel(const MarkerPlanEntry &entry)
+{
+    if (!entry.id.empty() && !entry.name.empty()) {
+        return entry.id + ": " + entry.name;
+    }
+    if (!entry.name.empty()) {
+        return entry.name;
+    }
+    return entry.id;
+}
+
+void recordMarker(const std::string &source, bool advanceAfter)
+{
+    if (gMarkerPlan.empty()) {
+        writeEventFields("marker", "Unplanned marker", {{"marker_source", source}});
+        debug("Unplanned marker recorded");
+        return;
+    }
+
+    const auto index = std::min(gMarkerPlanIndex, gMarkerPlan.size() - 1);
+    const auto &entry = gMarkerPlan[index];
+    writeEventFields("marker", markerLabel(entry), {
+        {"marker_source", source},
+        {"marker_plan_index", std::to_string(index)},
+        {"marker_id", entry.id},
+        {"marker_name", entry.name},
+        {"marker_description", entry.description},
+    });
+    debug("Planned marker recorded: " + markerLabel(entry));
+
+    if (advanceAfter && gMarkerPlanIndex + 1 < gMarkerPlan.size()) {
+        ++gMarkerPlanIndex;
+        debug("Next planned marker: " + markerLabel(gMarkerPlan[gMarkerPlanIndex]));
+    }
+}
+
+void moveMarkerPlan(int direction)
+{
+    if (gMarkerPlan.empty()) {
+        debug("No marker plan loaded");
+        return;
+    }
+    if (direction > 0 && gMarkerPlanIndex + 1 < gMarkerPlan.size()) {
+        ++gMarkerPlanIndex;
+    } else if (direction < 0 && gMarkerPlanIndex > 0) {
+        --gMarkerPlanIndex;
+    }
+    debug("Current planned marker: " + markerLabel(gMarkerPlan[gMarkerPlanIndex]));
 }
 
 std::string sampleValue(const FrameSample &sample, const std::string &path)
@@ -960,7 +1075,8 @@ void writeManifest()
     manifest << "  \"aircraft_path\": \"" << jsonEscape(aircraftPath) << "\",\n";
     manifest << "  \"capture_rate\": \"" << jsonEscape(gConfig.capture_rate) << "\",\n";
     manifest << "  \"max_array_values\": " << gConfig.max_array_values << ",\n";
-    manifest << "  \"include_default_datarefs\": " << (gConfig.include_default_datarefs ? "true" : "false") << "\n";
+    manifest << "  \"include_default_datarefs\": " << (gConfig.include_default_datarefs ? "true" : "false") << ",\n";
+    manifest << "  \"marker_plan_entries\": " << gMarkerPlan.size() << "\n";
     manifest << "}\n";
 }
 
@@ -1073,6 +1189,7 @@ void copyRunSupportFiles()
     copyFileIfExists(gPluginRoot / "config" / "capture_config.ini", gRunDir / "config" / "capture_config.ini");
     copyFileIfExists(gPluginRoot / "config" / "default_datarefs.txt", gRunDir / "config" / "default_datarefs.txt");
     copyFileIfExists(gPluginRoot / "config" / "datarefs.txt", gRunDir / "config" / "datarefs.txt");
+    copyFileIfExists(gPluginRoot / "config" / "marker_plan.txt", gRunDir / "config" / "marker_plan.txt");
     copyFileIfExists(gPluginRoot / "tools" / "viewer.html", gRunDir / "viewer.html");
     copyFileIfExists(gPluginRoot / "tools" / "analyze_capture.py", gRunDir / "tools" / "analyze_capture.py");
 }
@@ -1139,6 +1256,7 @@ void startCapture()
     }
 
     loadConfig();
+    loadMarkerPlan();
     buildDataRefList();
     resolveDataRefs();
 
@@ -1230,6 +1348,11 @@ enum class MenuAction {
     EveryFrame = 4,
     Rate30Hz = 5,
     Rate10Hz = 6,
+    MarkPlanned = 7,
+    MarkPlannedAdvance = 8,
+    NextMarker = 9,
+    PreviousMarker = 10,
+    ReloadMarkerPlan = 11,
 };
 
 void menuHandler(void *, void *itemRef)
@@ -1243,8 +1366,22 @@ void menuHandler(void *, void *itemRef)
         stopCapture("menu_stop");
         break;
     case MenuAction::Mark:
-        writeEvent("marker", "User marker");
-        debug("Marker recorded");
+        recordMarker("menu_generic", false);
+        break;
+    case MenuAction::MarkPlanned:
+        recordMarker("menu_planned", false);
+        break;
+    case MenuAction::MarkPlannedAdvance:
+        recordMarker("menu_planned_advance", true);
+        break;
+    case MenuAction::NextMarker:
+        moveMarkerPlan(1);
+        break;
+    case MenuAction::PreviousMarker:
+        moveMarkerPlan(-1);
+        break;
+    case MenuAction::ReloadMarkerPlan:
+        loadMarkerPlan();
         break;
     case MenuAction::EveryFrame:
         gConfig.capture_rate = "every_frame";
@@ -1272,6 +1409,11 @@ void createMenu()
     XPLMAppendMenuItem(gMenuId, "Stop Capture", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Stop)), 1);
     XPLMAppendMenuSeparator(gMenuId);
     XPLMAppendMenuItem(gMenuId, "Mark Event", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Mark)), 1);
+    XPLMAppendMenuItem(gMenuId, "Mark Planned Event", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::MarkPlanned)), 1);
+    XPLMAppendMenuItem(gMenuId, "Mark Planned Event + Advance", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::MarkPlannedAdvance)), 1);
+    XPLMAppendMenuItem(gMenuId, "Next Planned Marker", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::NextMarker)), 1);
+    XPLMAppendMenuItem(gMenuId, "Previous Planned Marker", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::PreviousMarker)), 1);
+    XPLMAppendMenuItem(gMenuId, "Reload Marker Plan", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::ReloadMarkerPlan)), 1);
     XPLMAppendMenuSeparator(gMenuId);
     XPLMAppendMenuItem(gMenuId, "Rate: Every Frame", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::EveryFrame)), 1);
     XPLMAppendMenuItem(gMenuId, "Rate: 30 Hz", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Rate30Hz)), 1);
@@ -1289,8 +1431,39 @@ void destroyMenu()
 int markCommandHandler(XPLMCommandRef, XPLMCommandPhase phase, void *)
 {
     if (phase == xplm_CommandBegin) {
-        writeEvent("marker", "Command marker");
-        debug("Command marker recorded");
+        recordMarker("command_generic", false);
+    }
+    return 1;
+}
+
+int markPlannedCommandHandler(XPLMCommandRef, XPLMCommandPhase phase, void *)
+{
+    if (phase == xplm_CommandBegin) {
+        recordMarker("command_planned", false);
+    }
+    return 1;
+}
+
+int markPlannedAdvanceCommandHandler(XPLMCommandRef, XPLMCommandPhase phase, void *)
+{
+    if (phase == xplm_CommandBegin) {
+        recordMarker("command_planned_advance", true);
+    }
+    return 1;
+}
+
+int nextMarkerCommandHandler(XPLMCommandRef, XPLMCommandPhase phase, void *)
+{
+    if (phase == xplm_CommandBegin) {
+        moveMarkerPlan(1);
+    }
+    return 1;
+}
+
+int previousMarkerCommandHandler(XPLMCommandRef, XPLMCommandPhase phase, void *)
+{
+    if (phase == xplm_CommandBegin) {
+        moveMarkerPlan(-1);
     }
     return 1;
 }
@@ -1301,6 +1474,22 @@ void createCommands()
     if (gMarkCommand) {
         XPLMRegisterCommandHandler(gMarkCommand, markCommandHandler, 1, nullptr);
     }
+    gMarkPlannedCommand = XPLMCreateCommand("xplane_truth_capture/mark_planned_event", "Mark the current planned XPlaneTruthCapture event");
+    if (gMarkPlannedCommand) {
+        XPLMRegisterCommandHandler(gMarkPlannedCommand, markPlannedCommandHandler, 1, nullptr);
+    }
+    gMarkPlannedAdvanceCommand = XPLMCreateCommand("xplane_truth_capture/mark_planned_event_and_advance", "Mark the current planned XPlaneTruthCapture event and advance to the next");
+    if (gMarkPlannedAdvanceCommand) {
+        XPLMRegisterCommandHandler(gMarkPlannedAdvanceCommand, markPlannedAdvanceCommandHandler, 1, nullptr);
+    }
+    gNextMarkerCommand = XPLMCreateCommand("xplane_truth_capture/next_marker", "Select the next planned XPlaneTruthCapture marker");
+    if (gNextMarkerCommand) {
+        XPLMRegisterCommandHandler(gNextMarkerCommand, nextMarkerCommandHandler, 1, nullptr);
+    }
+    gPreviousMarkerCommand = XPLMCreateCommand("xplane_truth_capture/previous_marker", "Select the previous planned XPlaneTruthCapture marker");
+    if (gPreviousMarkerCommand) {
+        XPLMRegisterCommandHandler(gPreviousMarkerCommand, previousMarkerCommandHandler, 1, nullptr);
+    }
 }
 
 void destroyCommands()
@@ -1308,6 +1497,22 @@ void destroyCommands()
     if (gMarkCommand) {
         XPLMUnregisterCommandHandler(gMarkCommand, markCommandHandler, 1, nullptr);
         gMarkCommand = nullptr;
+    }
+    if (gMarkPlannedCommand) {
+        XPLMUnregisterCommandHandler(gMarkPlannedCommand, markPlannedCommandHandler, 1, nullptr);
+        gMarkPlannedCommand = nullptr;
+    }
+    if (gMarkPlannedAdvanceCommand) {
+        XPLMUnregisterCommandHandler(gMarkPlannedAdvanceCommand, markPlannedAdvanceCommandHandler, 1, nullptr);
+        gMarkPlannedAdvanceCommand = nullptr;
+    }
+    if (gNextMarkerCommand) {
+        XPLMUnregisterCommandHandler(gNextMarkerCommand, nextMarkerCommandHandler, 1, nullptr);
+        gNextMarkerCommand = nullptr;
+    }
+    if (gPreviousMarkerCommand) {
+        XPLMUnregisterCommandHandler(gPreviousMarkerCommand, previousMarkerCommandHandler, 1, nullptr);
+        gPreviousMarkerCommand = nullptr;
     }
 }
 
