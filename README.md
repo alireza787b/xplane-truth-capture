@@ -21,7 +21,8 @@ X-Plane 12/Resources/plugins/XPlaneTruthCapture
 For formal px4xplane validation runs, follow `TEST_PROTOCOL.md`.
 
 1. Load the aircraft and airport you want to test.
-2. Select `Start Capture`.
+2. Select `Start Capture`. The menu will show `Recording Active`, and the
+   optional overlay shows recording status while capture is running.
 3. Fly a few simple maneuvers:
    - stationary on runway
    - taxi, accelerate, brake
@@ -33,6 +34,7 @@ For formal px4xplane validation runs, follow `TEST_PROTOCOL.md`.
 4. Select `Mark Event` during important moments.
    - You can also bind the command `xplane_truth_capture/mark_event` to a key or joystick button.
    - For planned test-card events, edit `config/marker_plan.txt` and bind `xplane_truth_capture/mark_planned_event_and_advance`.
+   - Generic markers stay unplanned even when a marker plan is loaded.
 5. Select `Stop Capture`.
 6. Zip and send the created folder from:
 
@@ -95,6 +97,9 @@ Supported settings:
 - `capture_rate = every_frame | 30hz | 10hz`
 - `max_array_values = 32`
 - `include_default_datarefs = true | false`
+- `overlay_enabled = true | false`
+- `overlay_x = 24`
+- `overlay_y_from_top = 48`
 
 ## Planned Markers
 
@@ -119,6 +124,7 @@ Useful commands for keyboard or joystick binding:
 - `xplane_truth_capture/previous_marker`
 
 Planned marker metadata is written to `events.jsonl` and copied into each run folder.
+Use `mark_event` for an unplanned note; it does not consume the current planned marker.
 
 ## Offline Analysis
 

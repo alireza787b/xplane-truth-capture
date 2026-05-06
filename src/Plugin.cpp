@@ -2,6 +2,8 @@
 
 #include "XPLMDataAccess.h"
 #include "XPLMDefs.h"
+#include "XPLMDisplay.h"
+#include "XPLMGraphics.h"
 #include "XPLMMenus.h"
 #include "XPLMPlanes.h"
 #include "XPLMPlugin.h"
@@ -58,6 +60,9 @@ struct Config {
     std::string capture_rate{"every_frame"};
     int max_array_values{32};
     bool include_default_datarefs{true};
+    bool overlay_enabled{true};
+    int overlay_x{24};
+    int overlay_y_from_top{48};
 };
 
 struct FrameSample {
@@ -312,6 +317,9 @@ fs::path gPluginRoot;
 fs::path gRunDir;
 XPLMMenuID gMenuId = nullptr;
 XPLMFlightLoopID gFlightLoopId = nullptr;
+int gMenuStartIndex = -1;
+int gMenuStopIndex = -1;
+int gMenuRecordingIndex = -1;
 
 std::atomic<bool> gCapturing{false};
 std::atomic<bool> gWriterStopping{false};
@@ -615,6 +623,20 @@ void loadConfig()
             }
         } else if (key == "include_default_datarefs") {
             gConfig.include_default_datarefs = parseBool(value, true);
+        } else if (key == "overlay_enabled") {
+            gConfig.overlay_enabled = parseBool(value, true);
+        } else if (key == "overlay_x") {
+            try {
+                gConfig.overlay_x = std::max(0, std::stoi(value));
+            } catch (...) {
+                debug("Invalid overlay_x; keeping default");
+            }
+        } else if (key == "overlay_y_from_top") {
+            try {
+                gConfig.overlay_y_from_top = std::max(0, std::stoi(value));
+            } catch (...) {
+                debug("Invalid overlay_y_from_top; keeping default");
+            }
         }
     }
 }
@@ -889,6 +911,12 @@ std::string markerLabel(const MarkerPlanEntry &entry)
 
 void recordMarker(const std::string &source, bool advanceAfter)
 {
+    if (source == "menu_generic" || source == "command_generic") {
+        writeEventFields("marker", "Unplanned marker", {{"marker_source", source}});
+        debug("Unplanned marker recorded");
+        return;
+    }
+
     if (gMarkerPlan.empty()) {
         writeEventFields("marker", "Unplanned marker", {{"marker_source", source}});
         debug("Unplanned marker recorded");
@@ -924,6 +952,84 @@ void moveMarkerPlan(int direction)
         --gMarkerPlanIndex;
     }
     debug("Current planned marker: " + markerLabel(gMarkerPlan[gMarkerPlanIndex]));
+}
+
+std::string currentMarkerText()
+{
+    if (gMarkerPlan.empty()) {
+        return "none";
+    }
+    const auto index = std::min(gMarkerPlanIndex, gMarkerPlan.size() - 1);
+    return markerLabel(gMarkerPlan[index]);
+}
+
+void updateMenuState()
+{
+    if (!gMenuId) {
+        return;
+    }
+
+    const bool capturing = gCapturing.load();
+    if (gMenuStartIndex >= 0) {
+        XPLMEnableMenuItem(gMenuId, gMenuStartIndex, capturing ? 0 : 1);
+        XPLMSetMenuItemName(gMenuId, gMenuStartIndex,
+                            capturing ? "Start Capture (Recording)" : "Start Capture", 1);
+    }
+    if (gMenuStopIndex >= 0) {
+        XPLMEnableMenuItem(gMenuId, gMenuStopIndex, capturing ? 1 : 0);
+    }
+    if (gMenuRecordingIndex >= 0) {
+        XPLMCheckMenuItem(gMenuId, gMenuRecordingIndex, capturing ? xplm_Menu_Checked : xplm_Menu_Unchecked);
+        XPLMSetMenuItemName(gMenuId, gMenuRecordingIndex,
+                            capturing ? "Recording Active" : "Recording Inactive", 1);
+        XPLMEnableMenuItem(gMenuId, gMenuRecordingIndex, 0);
+    }
+}
+
+double captureElapsedSeconds()
+{
+    if (gRunStats.host_start_ns <= 0) {
+        return 0.0;
+    }
+    return static_cast<double>(steadyNowNs() - gRunStats.host_start_ns) / 1e9;
+}
+
+int drawOverlayCallback(XPLMDrawingPhase, int, void *)
+{
+    if (!gCapturing.load() || !gConfig.overlay_enabled) {
+        return 1;
+    }
+
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+    XPLMGetScreenBoundsGlobal(&left, &top, &right, &bottom);
+    (void)right;
+    (void)bottom;
+
+    const int x = left + gConfig.overlay_x;
+    int y = top - gConfig.overlay_y_from_top;
+    float red[] = {1.0f, 0.18f, 0.14f};
+    float white[] = {0.95f, 0.95f, 0.95f};
+
+    std::ostringstream line1;
+    line1 << "REC XPlaneTruthCapture";
+    XPLMDrawString(red, x, y, line1.str().c_str(), nullptr, xplmFont_Basic);
+
+    std::ostringstream line2;
+    line2 << "elapsed " << std::fixed << std::setprecision(1) << captureElapsedSeconds()
+          << "s  frames " << gFrameId.load()
+          << "  rows " << gWrittenRows.load()
+          << "  dropped " << gDroppedRows.load();
+    y -= 14;
+    XPLMDrawString(white, x, y, line2.str().c_str(), nullptr, xplmFont_Basic);
+
+    std::ostringstream line3;
+    line3 << "next marker: " << currentMarkerText();
+    y -= 14;
+    XPLMDrawString(white, x, y, line3.str().c_str(), nullptr, xplmFont_Basic);
+    return 1;
 }
 
 std::string sampleValue(const FrameSample &sample, const std::string &path)
@@ -1287,6 +1393,7 @@ void startCapture()
     startWriter();
 
     gCapturing.store(true);
+    updateMenuState();
     writeEvent("start", "Capture started");
     XPLMScheduleFlightLoop(gFlightLoopId, captureInterval(), 1);
     debug("Capture started at " + gRunDir.string());
@@ -1300,6 +1407,7 @@ void stopCapture(const std::string &reason)
     }
 
     gCapturing.store(false);
+    updateMenuState();
     XPLMScheduleFlightLoop(gFlightLoopId, 0.0f, 1);
     writeEvent("stop", reason);
     gRunStats.host_stop_ns = steadyNowNs();
@@ -1342,6 +1450,7 @@ float flightLoopCallback(float elapsedSinceLastCall, float elapsedSinceLastFligh
 }
 
 enum class MenuAction {
+    Noop = 0,
     Start = 1,
     Stop = 2,
     Mark = 3,
@@ -1359,6 +1468,8 @@ void menuHandler(void *, void *itemRef)
 {
     const auto action = static_cast<MenuAction>(reinterpret_cast<std::intptr_t>(itemRef));
     switch (action) {
+    case MenuAction::Noop:
+        break;
     case MenuAction::Start:
         startCapture();
         break;
@@ -1405,8 +1516,9 @@ void createMenu()
 {
     const int item = XPLMAppendMenuItem(XPLMFindPluginsMenu(), XTC_PLUGIN_NAME, nullptr, 1);
     gMenuId = XPLMCreateMenu(XTC_PLUGIN_NAME, XPLMFindPluginsMenu(), item, menuHandler, nullptr);
-    XPLMAppendMenuItem(gMenuId, "Start Capture", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Start)), 1);
-    XPLMAppendMenuItem(gMenuId, "Stop Capture", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Stop)), 1);
+    gMenuStartIndex = XPLMAppendMenuItem(gMenuId, "Start Capture", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Start)), 1);
+    gMenuStopIndex = XPLMAppendMenuItem(gMenuId, "Stop Capture", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Stop)), 1);
+    gMenuRecordingIndex = XPLMAppendMenuItem(gMenuId, "Recording Inactive", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Noop)), 1);
     XPLMAppendMenuSeparator(gMenuId);
     XPLMAppendMenuItem(gMenuId, "Mark Event", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Mark)), 1);
     XPLMAppendMenuItem(gMenuId, "Mark Planned Event", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::MarkPlanned)), 1);
@@ -1418,6 +1530,7 @@ void createMenu()
     XPLMAppendMenuItem(gMenuId, "Rate: Every Frame", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::EveryFrame)), 1);
     XPLMAppendMenuItem(gMenuId, "Rate: 30 Hz", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Rate30Hz)), 1);
     XPLMAppendMenuItem(gMenuId, "Rate: 10 Hz", reinterpret_cast<void *>(static_cast<std::intptr_t>(MenuAction::Rate10Hz)), 1);
+    updateMenuState();
 }
 
 void destroyMenu()
@@ -1426,6 +1539,9 @@ void destroyMenu()
         XPLMDestroyMenu(gMenuId);
         gMenuId = nullptr;
     }
+    gMenuStartIndex = -1;
+    gMenuStopIndex = -1;
+    gMenuRecordingIndex = -1;
 }
 
 int markCommandHandler(XPLMCommandRef, XPLMCommandPhase phase, void *)
@@ -1547,9 +1663,11 @@ PLUGIN_API int XPluginStart(char *outName, char *outSignature, char *outDescript
     }
 
     gPluginRoot = detectPluginRoot();
+    loadConfig();
     createMenu();
     createCommands();
     createFlightLoop();
+    XPLMRegisterDrawCallback(drawOverlayCallback, xplm_Phase_Window, 0, nullptr);
     debug(std::string("Started v") + XTC_VERSION + " at " + gPluginRoot.string());
     return 1;
 }
@@ -1559,6 +1677,7 @@ PLUGIN_API void XPluginStop()
     if (gCapturing.load()) {
         stopCapture("plugin_stop");
     }
+    XPLMUnregisterDrawCallback(drawOverlayCallback, xplm_Phase_Window, 0, nullptr);
     destroyFlightLoop();
     destroyCommands();
     destroyMenu();

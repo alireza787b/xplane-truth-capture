@@ -15,6 +15,8 @@ Use the latest release build and send the complete run folder as a standard `.zi
 ## Capture Steps
 
 1. Start capture from `Plugins > XPlaneTruthCapture > Start Capture`.
+   The menu should change to `Recording Active`, and the optional overlay should
+   show elapsed time, frame count, row count, dropped rows, and next marker.
 2. Press the planned marker key before and after each maneuver.
 3. Keep each marked maneuver simple and separated by 5-10 seconds of steady flight when possible.
 4. Stop capture from `Plugins > XPlaneTruthCapture > Stop Capture`.
@@ -67,3 +69,5 @@ The hover section is important.
 - If the aircraft crashes, stop the capture and send it anyway, but label it as a crash run.
 - If X-Plane reloads the aircraft during capture, stop and start a new capture.
 - Send the `.zip` plus any short notes about aircraft, X-Plane version, weather, and the maneuver order.
+- Use `mark_event` only for extra unplanned notes. It does not advance or consume
+  the planned marker sequence.
