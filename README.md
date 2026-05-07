@@ -160,6 +160,10 @@ build/XPlaneTruthCapture
 
 On this development machine, the project can also use the SDK vendored by the adjacent `px4xplane` checkout.
 
+Windows packages built with MinGW statically link the GCC runtime so the plugin
+does not require separate `libgcc_s_seh-1.dll` or `libstdc++-6.dll` files beside
+`win.xpl`.
+
 ## Notes
 
 - Missing datarefs are recorded as missing, not converted to zero.

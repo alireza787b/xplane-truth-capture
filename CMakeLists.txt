@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(XPlaneTruthCapture VERSION 0.1.6 LANGUAGES CXX)
+project(XPlaneTruthCapture VERSION 0.1.7 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +54,9 @@ target_compile_definitions(XPlaneTruthCapture PRIVATE
 if(WIN32)
     target_compile_definitions(XPlaneTruthCapture PRIVATE IBM=1 WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
     target_link_libraries(XPlaneTruthCapture PRIVATE "${XPLANE_SDK_ROOT}/Libraries/Win/XPLM_64.lib")
+    if(MINGW)
+        target_link_options(XPlaneTruthCapture PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
 elseif(APPLE)
     target_compile_definitions(XPlaneTruthCapture PRIVATE APL=1)
     target_link_options(XPlaneTruthCapture PRIVATE -flat_namespace -undefined dynamic_lookup)
