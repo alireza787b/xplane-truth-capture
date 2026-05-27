@@ -283,6 +283,8 @@ const DataRefSpec kDefaultDataRefs[] = {
     {"sim/flightmodel2/gear/is_chocked", "controls", false},
     {"sim/flightmodel2/gear/tire_abs_gain", "controls", false},
     {"sim/flightmodel2/gear/tire_steer_command_deg", "controls", false},
+    {"sim/flightmodel/parts/tire_steer_cmd", "controls", false},
+    {"sim/operation/override/override_wheel_steer", "controls", false},
 
     {"sim/flightmodel/engine/ENGN_N1_", "engine", false},
     {"sim/flightmodel/engine/ENGN_N2_", "engine", false},
