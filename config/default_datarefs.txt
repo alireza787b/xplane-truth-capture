@@ -108,13 +108,15 @@ sim/cockpit2/controls/yoke_heading_ratio|controls|false
 sim/cockpit2/controls/total_pitch_ratio|controls|false
 sim/cockpit2/controls/total_roll_ratio|controls|false
 sim/cockpit2/controls/total_heading_ratio|controls|false
-sim/cockpit2/controls/flap_ratio|controls|false
+sim/cockpit2/controls/flap_handle_request_ratio|controls|false
+sim/cockpit2/controls/flap_handle_deploy_ratio|controls|false
+sim/cockpit2/controls/flap_system_deploy_ratio|controls|false
 sim/cockpit2/controls/speedbrake_ratio|controls|false
 sim/cockpit2/controls/wheel_brake_ratio|controls|false
+sim/cockpit2/controls/wheel_brake_ratio_applied|controls|false
 sim/cockpit2/controls/left_brake_ratio|controls|false
 sim/cockpit2/controls/right_brake_ratio|controls|false
 sim/cockpit2/controls/park_brake_valve|controls|false
-sim/cockpit2/controls/parking_brake_ratio|controls|false
 sim/cockpit2/engine/actuators/throttle_ratio_all|controls|false
 sim/cockpit2/engine/actuators/throttle_ratio|controls|false
 sim/joystick/joystick_axis_assignments|controls|false
@@ -135,12 +137,18 @@ sim/flightmodel2/wing/elevator1_deg|controls|false
 sim/flightmodel2/wing/elevator2_deg|controls|false
 sim/flightmodel2/wing/rudder1_deg|controls|false
 sim/flightmodel2/wing/rudder2_deg|controls|false
-sim/flightmodel2/controls/flap_handle_deploy_ratio|controls|false
+sim/flightmodel/controls/wing1l_fla1def|controls|false
+sim/flightmodel/controls/wing1r_fla1def|controls|false
+sim/flightmodel2/wing/flap1_deg|controls|false
 sim/flightmodel2/gear/is_chocked|controls|false
 sim/flightmodel2/gear/tire_abs_gain|controls|false
 sim/flightmodel2/gear/tire_steer_command_deg|controls|false
 sim/flightmodel/parts/tire_steer_cmd|controls|false
+sim/flightmodel/controls/l_brake_add|controls|false
+sim/flightmodel/controls/r_brake_add|controls|false
+sim/flightmodel/controls/parkbrake|controls|false
 sim/operation/override/override_wheel_steer|controls|false
+sim/operation/override/override_toe_brakes|controls|false
 
 sim/flightmodel/engine/ENGN_N1_|engine|false
 sim/flightmodel/engine/ENGN_N2_|engine|false
